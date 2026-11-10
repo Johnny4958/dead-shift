@@ -83,6 +83,24 @@ const vm = new THREE.Group(); vmScene.add(vm); const arms = makeArms(); vm.add(a
 function setVmGun() { if (vmGun) vm.remove(vmGun.group); const g = P.guns[P.cur]; vmGun = g ? gunModel(g.key, g.pap) : null; if (vmGun) vm.add(vmGun.group); if (soldierGun) soldier.hand.remove(soldierGun.group); soldierGun = g ? gunModel(g.key, g.pap) : null; if (soldierGun) soldier.hand.add(soldierGun.group); updHud(); }
 const soldier = makeSoldier(); scene.add(soldier.wrap); soldier.wrap.visible = false; let soldierGun = null;
 
+// bodies stay on the ground this long before sinking away; capped so big rounds stay smooth
+const CORPSE_T = isTouch ? 9 : 14, MAX_CORPSES = isTouch ? 8 : 14;
+// ---------------- light pool ----------------
+const lpTmp = [];
+function updLights(dt) {
+  const px = camera.position.x, pz = camera.position.z, S = WD.lightSrc, pool = WD.lightPool;
+  lpTmp.length = 0; for (const s of S) { s.d = Math.hypot(s.x - px, s.z - pz); lpTmp.push(s); }
+  lpTmp.sort((a, b) => a.d - b.d); const want = lpTmp.slice(0, pool.length);
+  for (const sl of pool) { if (sl.src && !want.includes(sl.src)) { sl.w -= dt * 3; if (sl.w <= 0) { sl.w = 0; sl.src = null; } } }
+  for (const s of want) if (!pool.some(sl => sl.src === s)) { const free = pool.find(sl => !sl.src); if (free) { free.src = s; free.w = 0; const L = free.light; L.color.setHex(s.col); L.distance = s.dist; L.decay = s.decay; L.position.set(s.x, s.y, s.z); } }
+  for (const sl of pool) {
+    const s = sl.src, L = sl.light; if (!s) { L.intensity = 0; continue; }
+    if (want.includes(s)) sl.w = Math.min(1, sl.w + dt * 3);
+    const k = s.kind === 'fire' ? (9 + Math.sin(G.t * 11 + s.i * 3) * 1.5 + R()) / 10 : 1 - (R() < s.flick * 0.05 ? 0.8 : 0);
+    L.intensity = s.base * k * sl.w;
+  }
+}
+
 // ---------------- HUD ----------------
 let shownPts = -1;
 function addPts(n, neg) {
@@ -145,7 +163,7 @@ function newGame() {
   for (const k of propTiles) grid[k] = 6;
   for (const d of doors) WD.doorMeshes[d.id].visible = true;
   for (const w of windows) { w.planks = 6; WD.planks[w.id].list.forEach(p => p.visible = true); }
-  Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0 });
+  Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0, god: false });
   Object.assign(P, { x: startPos.x, z: startPos.z, y: 0, vy: 0, yaw: Math.PI, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, view: 'fp', ads: 0, driving: false });
   P.perks.clear(); P.guns = [makeGun('pistol')]; setVmGun();
   setPower(false);
@@ -198,7 +216,7 @@ function losTo(x0, z0, x1, z1) { const d = Math.hypot(x1 - x0, z1 - z0); return 
 const N8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 function updZombie(z, dt, tx, tz) {
   const m = z.m;
-  if (z.dead) { z.deadT += dt; const k = Math.min(1, z.deadT / 0.6); m.body.rotation.x = -k * Math.PI / 2 * z.fallDir; m.body.position.y = -k * 0.75 * (m.scale || 1) + Math.sin(k * Math.PI) * 0.2; if (z.deadT > 4) m.root.position.y = -(z.deadT - 4) * 0.8; if (z.deadT > 5.5) { scene.remove(m.root); zombies.splice(zombies.indexOf(z), 1); } return; }
+  if (z.dead) { z.deadT += dt; const k = Math.min(1, z.deadT / 0.6); m.body.rotation.x = -k * Math.PI / 2 * z.fallDir; m.body.position.y = -k * 0.75 * (m.scale || 1) + Math.sin(k * Math.PI) * 0.2; const ss = CORPSE_T; if (z.deadT > ss) m.root.position.y = -(z.deadT - ss) * 0.8; if (z.deadT > ss + 1.6) { scene.remove(m.root); zombies.splice(zombies.indexOf(z), 1); } return; }
   if (z.state === 'rise') { z.t += dt; const k = Math.min(1, z.t / 1.4); m.root.position.y = -1.8 * (1 - k); m.root.rotation.y = z.yaw; animZombie(m, G.t, 0, 0.6, true); if (k >= 1) z.state = 'move'; return; }
   const dx = tx - z.x, dz = tz - z.z, dp = Math.hypot(dx, dz);
   const i = tileOf(z.x), j = tileOf(z.z), k = inb(i, j) ? idx(i, j) : 0;
@@ -247,7 +265,8 @@ function damageZombie(z, dmg, head, how) {
   if (z.hp <= 0) killZombie(z, how, head); else { addPts(10); hitMark(false); }
 }
 function killZombie(z, how, head) {
-  z.dead = true; z.deadT = 0; z.fallDir = R() < 0.5 ? 1 : -1; G.kills++; if (head) G.heads++;
+  z.dead = true; z.deadT = 0; z.fallDir = R() < 0.5 ? 1 : -1;
+  { const dead = zombies.filter(q => q.dead && q !== z && q.deadT < CORPSE_T); if (dead.length >= MAX_CORPSES) { dead.sort((a, b) => b.deadT - a.deadT); for (let n = 0; n <= dead.length - MAX_CORPSES; n++) dead[n].deadT = CORPSE_T; } } G.kills++; if (head) G.heads++;
   addPts(how === 'knife' ? 130 : head ? 100 : how === 'nuke' ? 0 : 60); hitMark(true); sfx.kill();
   spriteFx(T.blood(), 0xffffff, z.x, 1.1, z.z, 0.9, 0.5, { grow: 1.5 });
   if (z.type === 'toxic') { sfx.toxic(); const sp = spriteFx(T.puff(), 0x60ff40, z.x, 1, z.z, 3.5, 6, { op: 0.55, grow: 0.4 }); gases.push({ x: z.x, z: z.z, t: 6 }); }
@@ -516,8 +535,7 @@ function update(dt) {
   for (const p of pieces) if (p.gate) { const open = Math.hypot(p.x - P.x, p.z - P.z) < 2.2; p.gate.rotation.y = lerp(p.gate.rotation.y, open ? 1.5 : 0, Math.min(1, dt * 6)); }
   // world flicker
   for (const f of WD.fires) for (const s of f.fl) s.scale.y = 1.0 + Math.sin(G.t * 13 + s.id) * 0.15;
-  WD.fireLights.forEach((l, i) => l.intensity = 9 + Math.sin(G.t * 11 + i * 3) * 1.5 + R());
-  for (const r of WD.room) r.light.intensity = 14 * (1 - (R() < r.flick * 0.05 ? 0.8 : 0));
+  updLights(dt);
   updFx(dt);
   // timers
   if (toastT > 0) { toastT -= dt; if (toastT <= 0) $('toast').classList.remove('show'); }
@@ -568,7 +586,7 @@ function loop(now) {
 }
 
 // ---------------- menus ----------------
-const screens = ['title', 'pause', 'settings', 'controls', 'over'];
+const screens = ['title', 'pause', 'settings', 'controls', 'over', 'admin'];
 let back = 'title';
 function show(id) { for (const s of screens) $(s).classList.toggle('hidden', s !== id); }
 function play() {
@@ -584,6 +602,22 @@ $('bUpright').onclick = () => document.body.classList.add('upright');
 $('bPlay').onclick = play; $('bAgain').onclick = play; $('bMenu').onclick = toMenu; $('bResume').onclick = resume; $('bQuit').onclick = toMenu;
 $('bControls').onclick = () => { back = 'title'; show('controls'); }; $('bControls2').onclick = () => { back = 'pause'; show('controls'); };
 $('bSettings').onclick = () => { back = 'title'; syncSet(); show('settings'); }; $('bSettings2').onclick = () => { back = 'pause'; syncSet(); show('settings'); };
+// ---- admin panel (pause menu). Only touches this player's own points, guns and health. ----
+let admPap = false;
+function admSync() {
+  $('admPts').textContent = G.points.toLocaleString();
+  for (const b of $('admPapSeg').children) b.classList.toggle('on', (+b.dataset.v === 1) === admPap);
+  $('admExtra').children[1].textContent = 'GOD MODE: ' + (G.god ? 'ON' : 'OFF'); $('admExtra').children[1].classList.toggle('on', !!G.god);
+}
+function admMsg(t) { $('admMsg').textContent = t; }
+$('admGuns').innerHTML = Object.keys(W).map(k => `<button data-k="${k}">${W[k].name}</button>`).join('');
+$('bAdmin').onclick = () => { admMsg(''); admSync(); show('admin'); };
+$('bAdmBack').onclick = () => show('pause');
+for (const b of $('admMoney').children) b.onclick = () => { const n = +b.dataset.n; G.points += n; updHud(); admSync(); admMsg('Added ' + n.toLocaleString() + ' points to you.'); };
+for (const b of $('admPapSeg').children) b.onclick = () => { admPap = b.dataset.v === '1'; admSync(); };
+for (const b of $('admGuns').children) b.onclick = () => { giveGun(b.dataset.k, admPap); updHud(); admMsg('You now have the ' + gunNow().name + '.'); };
+$('admExtra').children[0].onclick = () => { for (const g of P.guns) { g.clip = g.mag; g.reserve = g.maxReserve; } P.nades = Math.max(P.nades, 4); updHud(); admMsg('Ammo and grenades refilled.'); };
+$('admExtra').children[1].onclick = () => { G.god = !G.god; admSync(); admMsg(G.god ? 'God mode on: zombies cannot hurt you.' : 'God mode off.'); };
 $('bSetBack').onclick = () => show(back); $('bCtlBack').onclick = () => show(back);
 function syncSet() {
   for (const b of $('qSeg').children) b.classList.toggle('on', b.dataset.q === SET.q);
@@ -605,4 +639,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor };
+window.__ds = { inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie };

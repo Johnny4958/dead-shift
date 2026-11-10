@@ -26,8 +26,43 @@ class Bucket { constructor() { this.p = []; this.n = []; this.u = []; }
   mesh(mat) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(this.u, 2)); g.computeTangents?.call; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.castShadow = true; return m; }
 }
 
+// Static batching: props that never move are merged per look-alike material and per 32 m cell,
+// so the renderer issues a few dozen draw calls for them instead of hundreds. Cells keep
+// frustum culling useful.
+function matKey(m) {
+  const c = (v) => v ? v.getHexString() : '-';
+  return [m.type, c(m.color), m.map ? m.map.uuid : '-', m.roughness, m.metalness, c(m.emissive), m.emissiveIntensity, m.transparent, m.opacity, m.side, m.vertexColors, m.blending, m.depthWrite].join('|');
+}
+function batchStatics(scene, list) {
+  scene.updateMatrixWorld(true);
+  const groups = new Map();
+  for (const o of list) {
+    if (!o.parent || Array.isArray(o.material)) continue;
+    const p = new THREE.Vector3(); o.getWorldPosition(p);
+    const key = matKey(o.material) + '#' + Math.floor(p.x / 32) + ',' + Math.floor(p.z / 32);
+    if (!groups.has(key)) groups.set(key, []); groups.get(key).push(o);
+  }
+  let before = 0, after = 0;
+  for (const objs of groups.values()) {
+    before += objs.length; if (objs.length < 2) { after++; continue; }
+    const geos = []; let cast = false;
+    for (const o of objs) {
+      let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv' && k !== 'color') g.deleteAttribute(k);
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      g.applyMatrix4(o.matrixWorld); geos.push(g); cast = cast || o.castShadow;
+    }
+    const keys = Object.keys(geos[0].attributes).sort().join();
+    if (!geos.every(g => Object.keys(g.attributes).sort().join() === keys)) { after += objs.length; continue; }
+    const m = new THREE.Mesh(merge(geos), objs[0].material); m.castShadow = cast; m.receiveShadow = true; scene.add(m);
+    for (const o of objs) o.parent.remove(o);
+    after++;
+  }
+  return { before, after };
+}
+
 export function buildWorld(scene, env, q) {
-  const W_ = {}; const add = o => { scene.add(o); return o; };
+  const W_ = {}; const add = o => { scene.add(o); return o; }; const STATICS = [];
   const rep = (t, x, y) => { const c = t.clone(); c.needsUpdate = true; c.repeat.set(x, y); return c; };
   const M = {
     stucco: std({ map: T.stucco(), normalMap: T.stuccoN(), roughness: 0.92, color: 0xd8ccb8 }),
@@ -100,16 +135,23 @@ export function buildWorld(scene, env, q) {
   // window frames + planks
   const frameParts = [];
   const plankG = new THREE.BoxGeometry(2.1, 0.22, 0.05);
-  W_.planks = [];
+  W_.planks = []; const allPlanks = [];
   for (const w of windows) {
     const x = cx(w.i), zz = cx(w.j); const ry = w.axis === 'x' ? 0 : Math.PI / 2;
     const o = w.outDir; // planks sit on the inside face
     for (const s of [-1, 1]) frameParts.push(bake(B(0.12, LINTEL - SILL, 0.25), { x: x + (w.axis === 'x' ? s * 0.94 : 0), z: zz + (w.axis === 'z' ? s * 0.94 : 0), y: (SILL + LINTEL) / 2, ry, c: 0x3a2a1c }));
     const g = new THREE.Group(); g.position.set(x - o[0] * 0.55, 0, zz - o[1] * 0.55); g.rotation.y = ry; add(g);
     const list = [];
-    for (let k = 0; k < 6; k++) { const p = new THREE.Mesh(plankG, M.plank); const y = SILL + 0.18 + (k % 3) * 0.45 + (k > 2 ? 0.2 : 0); p.position.set(0, y, (k > 2 ? -0.06 : 0)); p.rotation.z = (k % 2 ? 1 : -1) * (0.12 + (k * 0.13) % 0.3); p.castShadow = true; g.add(p); list.push(p); }
+    for (let k = 0; k < 6; k++) { const p = new THREE.Object3D(); const y = SILL + 0.18 + (k % 3) * 0.45 + (k > 2 ? 0.2 : 0); p.position.set(0, y, (k > 2 ? -0.06 : 0)); p.rotation.z = (k % 2 ? 1 : -1) * (0.12 + (k * 0.13) % 0.3); g.add(p); list.push(p); allPlanks.push(p); }
     W_.planks[w.id] = { group: g, list, base: list.map(p => ({ y: p.position.y, rz: p.rotation.z })) };
   }
+  // every barricade plank is one instance of a single InstancedMesh (1 draw call instead of ~80);
+  // setting plank.visible shows or hides its instance, so game code is unchanged
+  { const im = new THREE.InstancedMesh(plankG, M.plank, allPlanks.length); im.castShadow = true; im.receiveShadow = true; add(im);
+    scene.updateMatrixWorld(true); const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    allPlanks.forEach((p, i) => { const mw = p.matrixWorld.clone(); let vis = true; im.setMatrixAt(i, mw);
+      Object.defineProperty(p, 'visible', { get: () => vis, set: (v) => { v = !!v; if (v === vis) return; vis = v; im.setMatrixAt(i, v ? mw : zero); im.instanceMatrix.needsUpdate = true; }, configurable: true }); });
+    im.instanceMatrix.needsUpdate = true; im.computeBoundingSphere(); }
   const frames = new THREE.Mesh(merge(frameParts), std({ vertexColors: true, roughness: 0.8 })); frames.castShadow = true; add(frames);
 
   // buyable doors: boarded slabs
@@ -145,14 +187,14 @@ export function buildWorld(scene, env, q) {
   // ---- props ----
   const glowMat = (c, o = 0.9) => new THREE.SpriteMaterial({ map: T.glow(), color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false });
   const solid = (i0, j0, i1 = i0, j1 = j0) => { for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) prop(i, j); };
-  const meshAt = (geo, mat, x, y, z, ry = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.y = ry; m.castShadow = m.receiveShadow = true; add(m); return m; };
+  const meshAt = (geo, mat, x, y, z, ry = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.y = ry; if (!geo.boundingSphere) geo.computeBoundingSphere(); m.castShadow = geo.boundingSphere.radius > 0.9; m.receiveShadow = true; add(m); STATICS.push(m); return m; };
   // wrecked cars
   const wreck = (x, z, ry, col) => {
     const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; add(g); const paint = std({ map: T.rust(), color: col, roughness: 0.8, metalness: 0.3 });
     const b = new THREE.Mesh(B(1.8, 0.7, 4.4), paint); b.position.y = 0.55; g.add(b); const t = new THREE.Mesh(B(1.6, 0.55, 2.2), paint); t.position.set(0, 1.15, 0.2); g.add(t);
     const gl = new THREE.Mesh(B(1.62, 0.4, 2.0), M.dark); gl.position.set(0, 1.15, 0.2); gl.scale.set(1.0, 1, 1.02); g.add(gl);
     for (const [a, c] of [[0.85, 1.4], [-0.85, 1.4], [0.85, -1.4], [-0.85, -1.4]]) { const w = new THREE.Mesh(C(0.32, 0.32, 0.22, 10), M.dark); w.rotation.z = Math.PI / 2; w.position.set(a, 0.28, c); g.add(w); }
-    g.rotation.z = (r() - 0.5) * 0.08; g.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+    g.rotation.z = (r() - 0.5) * 0.08; g.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; STATICS.push(o); } });
   };
   wreck(41, 21, 0.2, 0x7a8a9a); solid(20, 9, 20, 11);
   wreck(13, 49, 1.4, 0x9a8a5a); solid(5, 23, 7, 25);
@@ -233,17 +275,21 @@ export function buildWorld(scene, env, q) {
   // ---- lights ----
   W_.hemi = add(new THREE.HemisphereLight(0x4a5a80, 0x1a1410, 0.55));
   W_.moonL = add(new THREE.DirectionalLight(0x8aa0d8, 0.55)); W_.moonL.position.set(-60, 90, -80); add(W_.moonL.target);
-  W_.room = [
-    { light: new THREE.PointLight(0xffc890, 14, 16, 1.6), x: 43, y: 3.0, z: 51, flick: 0.25 },
-    { light: new THREE.PointLight(0xc8f0ff, 14, 17, 1.6), x: 66, y: 3.0, z: 52, flick: 0.05 },
-    { light: new THREE.PointLight(0xffd890, 13, 17, 1.6), x: 22, y: 3.0, z: 20, flick: 0.12 },
+  // Light sources are data only. A small fixed pool of real PointLights is moved to the nearest
+  // sources every frame (main.js updLights), so phones shade 3 lights per pixel instead of 9,
+  // and the light count never changes (no shader recompiles).
+  W_.lightSrc = [
+    { col: 0xffc890, base: 14, dist: 16, decay: 1.6, x: 43, y: 3.0, z: 51, flick: 0.25, kind: 'room' },
+    { col: 0xc8f0ff, base: 14, dist: 17, decay: 1.6, x: 66, y: 3.0, z: 52, flick: 0.05, kind: 'room' },
+    { col: 0xffd890, base: 13, dist: 17, decay: 1.6, x: 22, y: 3.0, z: 20, flick: 0.12, kind: 'room' },
   ];
-  for (const l of W_.room) { l.light.position.set(l.x, l.y, l.z); add(l.light); }
   // ceiling light fixtures (emissive panels)
   const fixM = new THREE.MeshBasicMaterial({ color: 0xfff0d8 });
   for (const [x, z] of [[43, 51], [36, 47], [50, 55], [66, 52], [60, 50], [72, 56], [22, 20], [14, 16], [28, 24]]) { const f = meshAt(B(1.4, 0.06, 0.3), fixM, x, WALL_H - 0.04, z); f.castShadow = false; }
-  W_.fireLights = W_.fires.map(f => { const l = new THREE.PointLight(0xff7a30, 10, 13, 1.7); l.position.set(f.x, 1.6, f.z); add(l); return l; });
+  W_.fires.forEach((f, i) => W_.lightSrc.push({ col: 0xff7a30, base: 10, dist: 13, decay: 1.7, x: f.x, y: 1.6, z: f.z, kind: 'fire', i }));
+  W_.lightPool = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 16, 1.6); l.position.set(0, -50, 0); add(l); return { light: l, src: null, w: 0 }; });
   W_.carLight = new THREE.SpotLight(0xfff0d0, 0, 30, 0.55, 0.5, 1.2); add(W_.carLight); add(W_.carLight.target);
+  W_.batched = batchStatics(scene, STATICS);
   return W_;
 }
 

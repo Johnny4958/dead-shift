@@ -188,6 +188,7 @@ body.upright #rotateMsg{display:none!important}
   <button class="btn" id="bResume">RESUME</button>
   <button class="btn" id="bControls2">CONTROLS</button>
   <button class="btn" id="bSettings2">SETTINGS</button>
+  <button class="btn" id="bAdmin">ADMIN PANEL</button>
   <button class="btn" id="bQuit">QUIT TO MENU</button>
 </div>
 <div id="settings" class="screen hidden">
@@ -202,6 +203,18 @@ body.upright #rotateMsg{display:none!important}
     <div class="hint" id="qInfo" style="text-align:left;margin:4px 0 0"></div>
   </div>
   <button class="btn" id="bSetBack">BACK</button>
+</div>
+<div id="admin" class="screen hidden">
+  <div class="panel" style="max-width:640px">
+    <h3>ADMIN PANEL</h3>
+    <div class="hint" style="text-align:left;margin:0 0 6px">Changes only your own player.</div>
+    <div class="opt">Your points: <b id="admPts">0</b><div class="row seg" id="admMoney"><button data-n="1000">+1,000</button><button data-n="10000">+10,000</button><button data-n="100000">+100,000</button></div></div>
+    <div class="opt">Give gun<div class="row seg" id="admPapSeg"><button data-v="0">NORMAL</button><button data-v="1">UPGRADED</button></div></div>
+    <div class="row seg" id="admGuns" style="flex-wrap:wrap;gap:4px;justify-content:flex-start"></div>
+    <div class="opt" style="margin-top:8px">Extras<div class="row seg" id="admExtra"><button data-a="ammo">REFILL AMMO</button><button data-a="god">GOD MODE: OFF</button></div></div>
+    <div class="hint" id="admMsg" style="text-align:left;margin:6px 0 0;min-height:18px"></div>
+  </div>
+  <button class="btn" id="bAdmBack">BACK</button>
 </div>
 <div id="controls" class="screen hidden">
   <div class="panel">
@@ -224,6 +237,6 @@ body.upright #rotateMsg{display:none!important}
   <button class="btn" id="bAgain">PLAY AGAIN</button>
   <button class="btn" id="bMenu">MENU</button>
 </div>
-<script type="module" src="main.js?v=mwb0vqcq"></script>
+<script type="module" src="main.js?v=mwb3suuw"></script>
 </body>
 </html>

@@ -46,6 +46,42 @@ const ZM = () => once('zm', () => {
   return { skins, shirts, pants, toxicSkin, toxicCloth, fatSkin, eyes, eyesG, eyesR };
 });
 
+// One zombie = ~15 separate meshes (a draw call each). skinify() folds them into ONE SkinnedMesh
+// whose bones are the existing joint groups, so animation code is unchanged but the zombie costs
+// 4 draw calls (one per material) instead of ~15. Merged geometry is cached per zombie type.
+const SKIN_CACHE = {};
+const _inv = new THREE.Matrix4(), _mm = new THREE.Matrix4();
+function skinify(type, root, meshes, roleOf, matList) {
+  root.updateMatrixWorld(true);
+  _inv.copy(root.matrixWorld).invert();
+  const bones = [];
+  for (const o of meshes) if (!bones.includes(o.parent)) bones.push(o.parent);
+  let geo = SKIN_CACHE[type];
+  if (!geo) {
+    const byRole = [[], [], [], []];
+    for (const o of meshes) {
+      let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      g.applyMatrix4(_mm.multiplyMatrices(_inv, o.matrixWorld));
+      const n = g.attributes.position.count, bi = bones.indexOf(o.parent);
+      const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) { si[i * 4] = bi; sw[i * 4] = 1; }
+      g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4)); g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+      byRole[roleOf[o.material.uuid] ?? 2].push(g);
+    }
+    const list = [], counts = [];
+    for (const r of byRole) { if (r.length) { const m = mergeGeometries(r, false); list.push(m); counts.push(m.attributes.position.count); } else counts.push(0); }
+    geo = mergeGeometries(list, false); geo.clearGroups();
+    let start = 0; counts.forEach((c, i) => { if (c) geo.addGroup(start, c, i); start += c; });
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.6);
+    SKIN_CACHE[type] = geo;
+  }
+  const sk = new THREE.SkinnedMesh(geo, matList);
+  sk.castShadow = true; root.add(sk); sk.updateMatrixWorld(true);
+  sk.bind(new THREE.Skeleton(bones));
+  for (const o of meshes) { o.visible = false; o.castShadow = false; }
+}
 export function makeZombie(type) {
   const g = ZG(), m = ZM();
   const pickA = a => a[(Math.random() * a.length) | 0];
@@ -73,6 +109,7 @@ export function makeZombie(type) {
   const all = []; root.traverse(o => { if (o.isMesh) { o.castShadow = true; all.push(o); } });
   eyes.castShadow = false;
   // random posture so the horde does not move in lockstep
+  skinify(type, root, all, { [pant.uuid]: 0, [shirt.uuid]: 1, [skin.uuid]: 2, [eye.uuid]: 3 }, [pant, shirt, skin, eye]);
   const r = { root, body, hips, spine, neck, head, aL, aR, lL, lR, meshes: all, scale: sc, phase: Math.random() * 10, armUp: 0.6 + Math.random() * 0.8, limp: Math.random() < 0.3 ? 0.4 : 0, tilt: (Math.random() - 0.5) * 0.5 };
   return r;
 }
@@ -149,7 +186,7 @@ const GM = () => once('gm', () => ({
   glow: new THREE.MeshBasicMaterial({ color: 0x66ff88 }),
   glowP: new THREE.MeshBasicMaterial({ color: 0xe080ff }),
 }));
-export function makeGun(key, pap) {
+function makeGunOld(key, pap) {
   const m = GM(); const g = new THREE.Group();
   const M = pap ? m.pap : m.metal, Wd = pap ? m.pap : m.wood, P = pap ? m.pap : m.poly;
   const add = (geo, mat, x, y, z, rx = 0) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.rotation.x = rx; g.add(o); return o; };
@@ -211,6 +248,16 @@ export function makeArms() {
 
 // ---------------------------------------------------------------------------
 // The '68-style fastback (no badges). Forward = -z.
+// merge a group's direct mesh children per material (keeps sub-groups such as wheels separate)
+export function mergeChildren(parent) {
+  const by = new Map();
+  for (const o of [...parent.children]) { if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || Array.isArray(o.material)) continue; if (!by.has(o.material)) by.set(o.material, []); by.get(o.material).push(o); }
+  for (const [mat, list] of by) {
+    if (list.length < 2) continue;
+    const geos = list.map(o => { o.updateMatrix(); let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k); if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2)); return g.applyMatrix4(o.matrix); });
+    const m = new THREE.Mesh(mergeGeometries(geos, false), mat); parent.add(m); for (const o of list) parent.remove(o);
+  }
+}
 export function makeCar(env) {
   const g = new THREE.Group(); const inner = new THREE.Group(); inner.rotation.y = Math.PI / 2; g.add(inner);
   const paint = std({ color: 0x6e0b10, metalness: 0.6, roughness: 0.3, envMap: env, envMapIntensity: 0.9 });
@@ -257,6 +304,7 @@ export function makeCar(env) {
   }
   // interior shadow block + seats so the glass does not look hollow
   add(B(1.6, 0.4, 1.3), black, -0.4, 0.85, 0);
+  mergeChildren(inner); for (const w of wheels) mergeChildren(w.spin);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   return { group: g, wheels };
 }
@@ -351,3 +399,4 @@ export function pieceGeo(kind) {
     return { wood: merge(parts), metal: metal.length ? merge(metal) : null };
   });
 }
+export { makeGun } from './guns.js';
