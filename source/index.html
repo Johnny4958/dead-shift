@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>Dead Shift: Lockwood Motel</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+@font-face{font-family:BC;src:url(assets/bc800.woff2) format('woff2');font-weight:800}
+@font-face{font-family:BC;src:url(assets/bc600.woff2) format('woff2');font-weight:600}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#eee;font-family:BC,'Arial Narrow',Arial,sans-serif;overscroll-behavior:none;touch-action:none}
+canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
+.hidden{display:none!important}
+#hud{position:fixed;inset:0;pointer-events:none}
+#round{position:absolute;left:calc(18px + env(safe-area-inset-left));bottom:calc(14px + env(safe-area-inset-bottom));font-weight:800;font-size:clamp(54px,11vh,96px);color:#a30d0d;text-shadow:0 0 18px rgba(255,0,0,.45),2px 3px 0 #000;line-height:1;letter-spacing:2px;transition:color .6s}
+#round.flash{color:#fff;text-shadow:0 0 30px #fff}
+#round .tally{display:inline-flex;gap:6px;align-items:flex-end}
+#round .tally i{display:block;width:9px;height:clamp(48px,10vh,84px);background:#a30d0d;border-radius:2px;box-shadow:0 0 10px rgba(255,0,0,.5);transform:skewX(-6deg)}
+#round .tally i.x{position:absolute;width:clamp(70px,13vh,110px);height:9px;transform:rotate(-28deg);margin-left:-8px;margin-bottom:28px}
+#points{position:absolute;right:calc(18px + env(safe-area-inset-right));bottom:calc(118px + env(safe-area-inset-bottom));text-align:right}
+#pts{font-weight:800;font-size:30px;color:#f2d68a;text-shadow:2px 2px 0 #000;background:linear-gradient(90deg,transparent,rgba(0,0,0,.55));padding:2px 10px 2px 40px}
+.pop{position:absolute;right:10px;font-weight:800;font-size:22px;color:#ffe9a0;text-shadow:1px 1px 0 #000;animation:pop 1s ease-out forwards}
+.pop.neg{color:#ff6a5a}
+@keyframes pop{from{transform:translate(0,0);opacity:1}to{transform:translate(-60px,-50px);opacity:0}}
+#ammo{position:absolute;right:calc(18px + env(safe-area-inset-right));bottom:calc(14px + env(safe-area-inset-bottom));text-align:right;text-shadow:2px 2px 0 #000}
+#gunName{font-weight:600;font-size:17px;color:#ddd;letter-spacing:1px}
+#gunName.pap{color:#d79bff}
+#clip{font-weight:800;font-size:40px;color:#fff;line-height:1}
+#clip small{font-size:22px;color:#aaa}
+#clip.low{color:#ff4a3a}
+#nades{font-size:14px;color:#ccc;font-weight:600;margin-top:2px}
+#perks{position:absolute;left:calc(18px + env(safe-area-inset-left));bottom:calc(clamp(54px,11vh,96px) + 26px + env(safe-area-inset-bottom));display:flex;gap:6px}
+#perks b{display:block;width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.7);box-shadow:0 0 10px currentColor;font-size:13px;line-height:26px;text-align:center;color:#fff}
+#powerups{position:absolute;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:12px}
+#powerups div{font-weight:800;font-size:15px;color:#ffe680;text-align:center;text-shadow:0 0 8px #ff0}
+#powerups div.blink{animation:bl .3s infinite}
+@keyframes bl{50%{opacity:.25}}
+#prompt{position:absolute;left:50%;top:62%;transform:translateX(-50%);font-weight:600;font-size:clamp(16px,2.6vh,22px);color:#fff;text-shadow:0 0 6px #000,1px 1px 0 #000;text-align:center;white-space:nowrap;background:rgba(0,0,0,.35);padding:4px 12px;border-radius:4px}
+#prompt:empty{display:none}
+#prompt .k{display:inline-block;min-width:24px;padding:0 6px;border:1px solid #ddd;border-radius:4px;background:rgba(255,255,255,.12);margin:0 4px}
+#center{position:absolute;left:50%;top:30%;transform:translate(-50%,-50%);text-align:center;font-weight:800;font-size:clamp(28px,6vh,52px);color:#ff3a2a;text-shadow:0 0 20px rgba(255,0,0,.6),2px 2px 0 #000;opacity:0;transition:opacity .4s;white-space:nowrap}
+#center.show{opacity:1}
+#center small{display:block;font-size:.45em;color:#eee;font-weight:600;letter-spacing:2px}
+#cross{position:absolute;left:50%;top:50%;width:0;height:0}
+#cross i{position:absolute;background:#fff;box-shadow:0 0 2px #000;transition:transform .05s}
+#cross i:nth-child(1),#cross i:nth-child(2){width:2px;height:9px;left:-1px}
+#cross i:nth-child(3),#cross i:nth-child(4){width:9px;height:2px;top:-1px}
+#cross.hide{display:none}
+#hit{position:absolute;left:50%;top:50%;width:26px;height:26px;transform:translate(-50%,-50%) rotate(45deg);opacity:0}
+#hit::before,#hit::after{content:'';position:absolute;background:#fff;box-shadow:0 0 2px #000}
+#hit::before{left:12px;top:0;width:2px;height:26px;clip-path:polygon(0 0,100% 0,100% 35%,0 35%,0 65%,100% 65%,100% 100%,0 100%)}
+#hit::after{top:12px;left:0;height:2px;width:26px;clip-path:polygon(0 0,35% 0,35% 100%,0 100%,0 0,65% 0,100% 0,100% 100%,65% 100%)}
+#hit.kill::before,#hit.kill::after{background:#ff3a2a}
+#dmg{position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 45%,rgba(140,0,0,.85) 100%);opacity:0}
+#toxicfx{position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 30%,rgba(60,200,30,.5) 100%);opacity:0}
+#flash{position:absolute;inset:0;background:#fff;opacity:0}
+#scope{position:absolute;inset:0;background:radial-gradient(circle at center,transparent 0 32vh,#000 32.3vh);opacity:0}
+#scope::after{content:'';position:absolute;left:50%;top:50%;width:64vh;height:1px;background:#000;transform:translate(-50%,0)}
+#scope::before{content:'';position:absolute;left:50%;top:50%;height:64vh;width:1px;background:#000;transform:translate(0,-50%)}
+#minimapWrap{position:absolute;top:calc(10px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));width:118px;height:118px;border-radius:50%;overflow:hidden;border:2px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45)}
+#zcount{position:absolute;top:calc(132px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left));font-size:14px;font-weight:600;color:#ccc;text-shadow:1px 1px 0 #000}
+#toast{position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);background:rgba(0,0,0,.7);border:1px solid #555;padding:6px 14px;border-radius:6px;font-weight:600;font-size:16px;opacity:0;transition:opacity .3s;white-space:nowrap}
+#toast.show{opacity:1}
+#fps{position:absolute;top:calc(8px + env(safe-area-inset-top));right:calc(70px + env(safe-area-inset-right));font:12px monospace;color:#8f8}
+#buildbar{position:absolute;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:8px}
+#buildbar div{background:rgba(0,0,0,.6);border:2px solid #555;border-radius:8px;padding:6px 10px;font-weight:600;font-size:15px;text-align:center;min-width:86px}
+#buildbar div.sel{border-color:#f2d68a;color:#f2d68a}
+#buildbar div span{display:block;font-size:12px;color:#aaa}
+#carhud{position:absolute;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);font-weight:800;font-size:34px;text-shadow:2px 2px 0 #000}
+#carhud small{font-size:16px;color:#bbb}
+/* menus */
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(40,0,0,.55),rgba(0,0,0,.92));z-index:20;padding:20px;text-align:center;overflow-y:auto}
+#title{background:radial-gradient(ellipse at 50% 60%,rgba(70,6,6,.55),rgba(0,0,0,.92) 70%)}
+h1{font-weight:800;font-size:clamp(46px,12vw,110px);margin:0;color:#c11;letter-spacing:4px;text-shadow:0 0 30px rgba(255,0,0,.5),3px 4px 0 #000;line-height:.9}
+h2{font-weight:600;font-size:clamp(16px,3.2vw,24px);margin:6px 0 18px;color:#ddd;letter-spacing:6px}
+.btn{pointer-events:auto;display:block;min-width:240px;margin:6px auto;padding:12px 22px;background:linear-gradient(#2a0a0a,#120404);border:2px solid #7a1a1a;color:#f0e0d0;font:600 22px BC,Arial;letter-spacing:2px;border-radius:6px;cursor:pointer}
+.btn:hover,.btn:focus,.btn.focus{border-color:#ff4a3a;color:#fff;outline:none;box-shadow:0 0 14px rgba(255,40,30,.5)}
+.btn.small{min-width:0;display:inline-block;font-size:18px;padding:8px 14px}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:6px 0}
+.panel{max-width:760px;width:100%;background:rgba(0,0,0,.6);border:1px solid #444;border-radius:8px;padding:14px 18px;text-align:left;font-family:Arial,sans-serif;font-size:14px;line-height:1.45;color:#ddd}
+.panel h3{font-family:BC,Arial;font-weight:800;font-size:22px;color:#f2d68a;margin:6px 0;letter-spacing:1px}
+.panel table{border-collapse:collapse;width:100%}
+.panel td{padding:3px 6px;border-bottom:1px solid #333;vertical-align:top}
+.panel td:first-child{color:#f2d68a;white-space:nowrap;font-weight:bold}
+.opt{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;font-family:BC,Arial;font-size:19px}
+.opt .row{margin:0}
+.seg button{pointer-events:auto;background:#1a1a1a;border:1px solid #555;color:#ccc;font:600 17px BC,Arial;padding:6px 12px;cursor:pointer}
+.seg button.on{background:#7a1a1a;color:#fff;border-color:#ff4a3a}
+input[type=range]{width:170px;accent-color:#c22}
+#best{color:#aaa;font-size:16px;margin-top:10px;letter-spacing:1px}
+#loading{font-size:18px;color:#aaa;margin-top:12px}
+#over h1{font-size:clamp(40px,9vw,90px)}
+#stats{font-size:20px;color:#ddd;margin:12px 0;line-height:1.6}
+#stats b{color:#f2d68a}
+.hint{font-family:Arial;font-size:13px;color:#999;max-width:520px;margin:10px auto 0}
+/* touch controls */
+#touch{position:fixed;inset:0;z-index:5;display:none}
+body[data-device=touch] #touch.live{display:block}
+#stick{position:absolute;width:130px;height:130px;margin:-65px 0 0 -65px;border-radius:50%;border:2px solid rgba(255,255,255,.25);background:rgba(255,255,255,.06);display:none}
+#stick.on{display:block}
+#knob{position:absolute;left:50%;top:50%;width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.3);transform:translate(-50%,-50%)}
+.tb{position:absolute;border-radius:50%;background:rgba(20,20,20,.45);border:2px solid rgba(255,255,255,.35);color:#fff;font:600 13px BC,Arial;display:flex;align-items:center;justify-content:center;text-align:center;letter-spacing:1px}
+.tb.on{background:rgba(255,255,255,.3)}
+.tb.lock{border-color:#f2d68a;color:#f2d68a}
+.tb[data-b=fire]{width:96px;height:96px;right:calc(26px + env(safe-area-inset-right));bottom:calc(120px + env(safe-area-inset-bottom));font-size:18px;background:rgba(150,20,20,.45);border-color:rgba(255,120,100,.6)}
+.tb[data-b=aim]{width:62px;height:62px;right:calc(134px + env(safe-area-inset-right));bottom:calc(170px + env(safe-area-inset-bottom))}
+.tb[data-b=reload]{width:56px;height:56px;right:calc(130px + env(safe-area-inset-right));bottom:calc(98px + env(safe-area-inset-bottom))}
+.tb[data-b=use]{width:66px;height:66px;right:calc(46px + env(safe-area-inset-right));bottom:calc(228px + env(safe-area-inset-bottom));background:rgba(140,110,30,.45);border-color:rgba(255,220,120,.7)}
+.tb[data-b=jump]{width:52px;height:52px;right:calc(200px + env(safe-area-inset-right));bottom:calc(120px + env(safe-area-inset-bottom))}
+.tb[data-b=swap]{width:50px;height:50px;right:calc(124px + env(safe-area-inset-right));bottom:calc(240px + env(safe-area-inset-bottom))}
+.tb[data-b=knife]{width:50px;height:50px;right:calc(196px + env(safe-area-inset-right));bottom:calc(184px + env(safe-area-inset-bottom))}
+.tb[data-b=grenade]{width:50px;height:50px;right:calc(186px + env(safe-area-inset-right));bottom:calc(248px + env(safe-area-inset-bottom))}
+.tb[data-b=sprint]{width:50px;height:50px;left:calc(20px + env(safe-area-inset-left));bottom:calc(150px + env(safe-area-inset-bottom))}
+.tb.sq{border-radius:10px;width:58px;height:34px;font-size:12px}
+.tb[data-b=pause]{top:calc(10px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right))}
+.tb[data-b=view]{top:calc(10px + env(safe-area-inset-top));right:calc(78px + env(safe-area-inset-right))}
+.tb[data-b=build]{top:calc(10px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right))}
+.tb[data-b=rotate]{top:calc(52px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right))}
+body:not(.building) .tb[data-b=rotate]{display:none}
+body.driving .tb:not([data-b=use]):not([data-b=pause]):not([data-b=view]){display:none}
+body.driving #cross{display:none}
+body[data-device=touch] #ammo{bottom:calc(14px + env(safe-area-inset-bottom));right:calc(240px + env(safe-area-inset-right))}
+body[data-device=touch] #points{bottom:auto;top:calc(52px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right))}
+body[data-device=touch] #fps{right:calc(210px + env(safe-area-inset-right))}
+body[data-device=touch] #prompt{top:auto;bottom:calc(36% + env(safe-area-inset-bottom))}
+@media (orientation:portrait){body[data-device=touch] #rotateMsg{display:flex}}
+body.upright #rotateMsg{display:none!important}
+#rotateMsg{display:none;position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.92);align-items:center;justify-content:center;flex-direction:column;font-size:24px;font-weight:600;text-align:center;padding:30px}
+#rotateMsg .ph{width:60px;height:100px;border:4px solid #ddd;border-radius:10px;margin-bottom:20px;animation:rot 2s infinite}
+@keyframes rot{0%,30%{transform:rotate(0)}60%,100%{transform:rotate(90deg)}}
+</style>
+</head>
+<body data-device="kbm">
+<canvas id="c"></canvas>
+<div id="hud" class="hidden">
+  <div id="dmg"></div><div id="toxicfx"></div><div id="scope"></div><div id="flash"></div>
+  <div id="minimapWrap"><canvas id="minimap" width="236" height="236" style="width:118px;height:118px"></canvas></div>
+  <div id="zcount"></div>
+  <div id="cross"><i></i><i></i><i></i><i></i></div><div id="hit"></div>
+  <div id="round"></div>
+  <div id="perks"></div>
+  <div id="points"><div id="pts">500</div></div>
+  <div id="ammo"><div id="gunName"></div><div id="clip"></div><div id="nades"></div></div>
+  <div id="powerups"></div>
+  <div id="prompt"></div>
+  <div id="center"></div>
+  <div id="buildbar" class="hidden"></div>
+  <div id="carhud" class="hidden"></div>
+  <div id="toast"></div>
+  <div id="fps" class="hidden"></div>
+</div>
+<div id="touch">
+  <div id="stick"><div id="knob"></div></div>
+  <div class="tb" data-b="fire">FIRE</div>
+  <div class="tb" data-b="aim">AIM</div>
+  <div class="tb" data-b="reload">RELOAD</div>
+  <div class="tb" data-b="use">USE</div>
+  <div class="tb" data-b="jump">JUMP</div>
+  <div class="tb" data-b="swap">SWAP</div>
+  <div class="tb" data-b="knife">KNIFE</div>
+  <div class="tb" data-b="grenade">NADE</div>
+  <div class="tb" data-b="sprint">RUN</div>
+  <div class="tb sq" data-b="pause">PAUSE</div>
+  <div class="tb sq" data-b="view">VIEW</div>
+  <div class="tb sq" data-b="build">BUILD</div>
+  <div class="tb sq" data-b="rotate">ROTATE</div>
+</div>
+<div id="rotateMsg"><div class="ph"></div>Plays best with your phone sideways<button id="bUpright" style="margin-top:22px;font-size:17px;padding:12px 22px;border-radius:10px;border:2px solid #ccc;background:#222;color:#fff">Play upright anyway</button></div>
+
+<div id="title" class="screen">
+  <h1>DEAD SHIFT</h1>
+  <h2>LOCKWOOD MOTEL</h2>
+  <button class="btn" id="bPlay">PLAY</button>
+  <button class="btn" id="bControls">CONTROLS</button>
+  <button class="btn" id="bSettings">SETTINGS</button>
+  <div id="best"></div>
+  <div id="loading"></div>
+  <div class="hint" id="titleHint"></div>
+</div>
+<div id="pause" class="screen hidden">
+  <h1 style="font-size:64px">PAUSED</h1>
+  <button class="btn" id="bResume">RESUME</button>
+  <button class="btn" id="bControls2">CONTROLS</button>
+  <button class="btn" id="bSettings2">SETTINGS</button>
+  <button class="btn" id="bQuit">QUIT TO MENU</button>
+</div>
+<div id="settings" class="screen hidden">
+  <div class="panel" style="max-width:520px">
+    <h3>SETTINGS</h3>
+    <div class="opt">Graphics<div class="row seg" id="qSeg"><button data-q="auto">AUTO</button><button data-q="low">LOW</button><button data-q="medium">MED</button><button data-q="high">HIGH</button></div></div>
+    <div class="opt">Look sensitivity<input type="range" id="sens" min="0.3" max="2.5" step="0.05"></div>
+    <div class="opt">Field of view<input type="range" id="fov" min="60" max="95" step="1"></div>
+    <div class="opt">Volume<input type="range" id="vol" min="0" max="1" step="0.05"></div>
+    <div class="opt">Invert look up/down<div class="row seg" id="invSeg"><button data-v="0">OFF</button><button data-v="1">ON</button></div></div>
+    <div class="opt">Show FPS<div class="row seg" id="fpsSeg"><button data-v="0">OFF</button><button data-v="1">ON</button></div></div>
+    <div class="hint" id="qInfo" style="text-align:left;margin:4px 0 0"></div>
+  </div>
+  <button class="btn" id="bSetBack">BACK</button>
+</div>
+<div id="controls" class="screen hidden">
+  <div class="panel">
+    <h3>HOW TO PLAY</h3>
+    Survive as many rounds as you can. Shooting zombies earns points. Spend points on doors, guns on the walls, the Mystery Box, perk machines, and base building. Zombies break the boards off the windows. Stand at a window and hold USE to nail them back for points. Open the Parking Lot door to reach the car and the open ground for building. Turn on the power in the Garage to wake up the perk machines and The Forge.
+    <h3>KEYBOARD &amp; MOUSE</h3>
+    <table><tr><td>Move / Sprint</td><td>W A S D / Shift</td></tr><tr><td>Look / Shoot / Aim</td><td>Mouse / Left click / Right click (click the game first to lock the mouse)</td></tr><tr><td>Use, buy, repair, drive</td><td>F or E (hold to repair windows)</td></tr><tr><td>Reload / Swap gun</td><td>R / Q, 1, 2 or mouse wheel</td></tr><tr><td>Knife / Grenade / Jump</td><td>V / G / Space</td></tr><tr><td>1st / 3rd person</td><td>C</td></tr><tr><td>Build mode</td><td>B, then click to place, Q to change piece, T to rotate</td></tr><tr><td>Pause</td><td>Esc or P</td></tr><tr><td>Car</td><td>W/S gas and brake, A/D steer, F to get out</td></tr></table>
+    <h3>PS5 CONTROLLER</h3>
+    <table><tr><td>Move / Look</td><td>Left stick / Right stick (click L3 to sprint)</td></tr><tr><td>Shoot / Aim</td><td>R2 / L2</td></tr><tr><td>Use, buy, repair, reload</td><td>Square (hold at windows to repair)</td></tr><tr><td>Swap gun</td><td>Triangle</td></tr><tr><td>Knife / Grenade / Jump</td><td>R1 or R3 / L1 / Cross</td></tr><tr><td>Build mode</td><td>Circle, then R2 to place, Triangle to change piece, D-pad down to rotate</td></tr><tr><td>1st / 3rd person</td><td>D-pad up</td></tr><tr><td>Pause</td><td>Options</td></tr><tr><td>Car</td><td>R2 gas, L2 brake, left stick steer, Square to get out</td></tr></table>
+    <h3>TOUCH (PHONE)</h3>
+    <table><tr><td>Move</td><td>Drag anywhere on the left side</td></tr><tr><td>Look</td><td>Drag on the right side. You can drag while holding FIRE.</td></tr><tr><td>Buttons</td><td>FIRE, AIM (tap to toggle), RELOAD, USE, SWAP, KNIFE, NADE, JUMP, RUN, plus BUILD, VIEW and PAUSE up top</td></tr></table>
+    <h3>TIPS</h3>
+    Headshots pay more. Knife kills pay the most. The Mystery Box costs 950 and moves after a few uses. Fat zombies soak up bullets, skinny ones sprint, and glowing green ones burst into poison gas when they die, so keep your distance. Walls you build block zombies until they chew through them, and spikes shred anything that walks over them.
+  </div>
+  <button class="btn" id="bCtlBack">BACK</button>
+</div>
+<div id="over" class="screen hidden">
+  <h1>GAME OVER</h1>
+  <div id="stats"></div>
+  <button class="btn" id="bAgain">PLAY AGAIN</button>
+  <button class="btn" id="bMenu">MENU</button>
+</div>
+<script type="module" src="main.js"></script>
+</body>
+</html>
