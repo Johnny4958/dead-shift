@@ -1,12 +1,17 @@
 // Lockwood and beyond: a tile grid (2 m tiles) that drives collision, zombie pathing, building and the meshes.
 // West: the motel and the town of Lockwood. Middle: the woods and the old mall. East: Pine Hollow.
 // South: the graveyard and the army base behind it. Below the flood wall: sealed bunkers (reached through hatches).
-export const S = 2, GW = 180, GH = 118, WALL_H = 3.4;
+// The hand-built map ("core", CW x CH tiles) never changes shape. Around it the world goes on forever:
+// proc.js generates woods, roads, towns and abandoned buildings chunk by chunk. The tile arrays below are a
+// GW x GH window that slides with the player (origin OI, OJ in world tiles); tiles are always addressed in
+// world tile coordinates through idx()/inb().
+export const S = 2, CW = 180, CH = 118, GW = 320, GH = 320, WALL_H = 3.4;
+export let OI = 0, OJ = 0;
 export const OUT = 0, FLOOR = 1, WALL = 2, WIN = 3, DOOR = 4, FENCE = 5, PROP = 6, BWALL = 7, BDOOR = 8, SPIKE = 9, GLASS = 10, OPEN = 11, TREE = 12, GRAVE = 13, MINE = 14, LAMP = 15;
 export const ZONES = ['Lobby', 'Outside', 'Diner', 'Garage'];
 // area of each tile: what the ground looks like and how dangerous it is
-export const A_TOWN = 0, A_WOODS = 1, A_GRAVE = 2, A_PINE = 3, A_BASE = 4, A_BUNKER = 5, A_MALL = 6, A_CARNIVAL = 7, A_LOT = 8;
-export const AREA_NAMES = ['Lockwood', 'The Woods', 'Graveyard', 'Pine Hollow', 'Fort Calder', 'Bunker', 'Greenbrook Park Mall', 'Carnival', 'Motel Lot'];
+export const A_TOWN = 0, A_WOODS = 1, A_GRAVE = 2, A_PINE = 3, A_BASE = 4, A_BUNKER = 5, A_MALL = 6, A_CARNIVAL = 7, A_LOT = 8, A_ASHFORD = 9, A_WILDS = 10, A_STOP = 11;
+export const AREA_NAMES = ['Lockwood', 'The Woods', 'Graveyard', 'Pine Hollow', 'Fort Calder', 'Bunker', 'Greenbrook Park Mall', 'Carnival', 'Motel Lot', 'Ashford', 'Deep Woods', 'Route 9 Truck Stop'];
 
 export const grid = new Uint8Array(GW * GH);
 export const zone = new Int16Array(GW * GH).fill(-1);
@@ -14,9 +19,15 @@ export const owner = new Int16Array(GW * GH).fill(-1);   // door id / window id 
 export const area = new Uint8Array(GW * GH);
 export const surf = new Uint8Array(GW * GH);            // 0 grass, 1 asphalt lot, 2 road, 3 dirt, 4 gravel, 5 concrete pad
 export const safe = new Uint8Array(GW * GH);            // zombies cannot enter while the base holds
-export const idx = (i, j) => j * GW + i;
-export const inb = (i, j) => i >= 0 && j >= 0 && i < GW && j < GH;
+export const idx = (i, j) => (j - OJ) * GW + (i - OI);
+export const inb = (i, j) => i >= OI && j >= OJ && i < OI + GW && j < OJ + GH;
+export const ijOf = k => [k % GW + OI, ((k / GW) | 0) + OJ];
+export const inCore = (i, j) => i >= 0 && j >= 0 && i < CW && j < CH;
+// a tree's trunk sits a little off its tile centre, the same on every load
+export function treeOff(i, j) { let h = Math.imul(i, 73856093) ^ Math.imul(j, 19349663); h = Math.imul(h ^ (h >>> 13), 1274126177); return [((h & 255) / 255 - 0.5) * 0.7, (((h >>> 8) & 255) / 255 - 0.5) * 0.7]; }
+export const TRUNK_R = 0.32;
 export const at = (i, j) => inb(i, j) ? grid[idx(i, j)] : FENCE;
+export const tAt = (x, z) => at(Math.floor(x / 2), Math.floor(z / 2));
 export const tileOf = v => Math.floor(v / S);
 export const cx = i => i * S + S / 2;
 
@@ -88,10 +99,11 @@ function bld(name, i0, j0, i1, j1, o = {}) {
 }
 
 export function buildMap() {
+  OI = 0; OJ = 0;
   grid.fill(OUT); zone.fill(-1); owner.fill(-1); area.fill(A_TOWN); surf.fill(0); safe.fill(0);
   for (const a of [doors, windows, rooms, hatches, bunkers, loots, groundGuns, intelSpots, boxSpotList, carSpots, generatorSpots, craftSpots, traderSpots, trees, graves, glassTiles]) a.length = 0;
   openZones.clear(); openZones.add(3); ZONES.length = 4; zid = 4; seed = 1234; safeOn = true;
-  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const k = idx(i, j); if (i === 0 || j === 0 || i === GW - 1 || j === GH - 1 || j === 106) grid[k] = FENCE; else zone[k] = 1; }
+  zone.fill(1); // no border: the core runs straight into the generated woods
   // areas and ground
   setArea(1, 1, 43, 39, A_LOT); setSurf(1, 1, 43, 39, 1);
   setArea(96, 1, 139, 105, A_WOODS);
@@ -100,9 +112,9 @@ export function buildMap() {
   setArea(4, 92, 44, 104, A_BASE); setSurf(4, 92, 44, 104, 5);
   setArea(80, 48, 95, 70, A_CARNIVAL); setSurf(80, 48, 95, 70, 4);
   setArea(98, 46, 138, 88, A_MALL); setSurf(100, 46, 136, 49, 1);
-  setArea(1, 107, 178, 116, A_BUNKER);
+  setArea(0, 106, CW - 1, CH - 1, A_WOODS); setArea(0, 0, 0, CH - 1, A_WOODS); setArea(CW - 1, 0, CW - 1, CH - 1, A_PINE); setArea(0, 0, CW - 1, 0, A_WOODS);
   // roads: Main St runs all the way east through the woods to Pine Hollow
-  setSurf(1, 41, 178, 45, 2); setSurf(46, 1, 49, 104, 2); setSurf(1, 72, 95, 75, 2); setSurf(159, 8, 162, 100, 2);
+  setSurf(0, 41, CW - 1, 45, 2); setSurf(46, 0, 49, CH - 1, 2); setSurf(0, 72, 95, 75, 2); setSurf(159, 0, 162, CH - 1, 2); // these roads carry on out of the core
   setSurf(50, 38, 60, 40, 5);   // gas station apron
   setSurf(64, 16, 78, 20, 5);   // chop shop pad
 
@@ -173,21 +185,23 @@ export function buildMap() {
   bld('Pine Chapel', 165, 78, 172, 87, { wall: 'stone', floor: 'wood', kind: 'church', side: 'w', loot: [[0, 9, 'cabinet']] });
 
   // trees: dense in the woods, a few around the towns; roads, the mall lot and buildings stay clear
-  for (let j = 1; j < 105; j++) for (let i = 1; i < GW - 1; i++) {
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
     const k = idx(i, j); if (grid[k] !== OUT || surf[k] !== 0) continue;
-    const a = area[k]; let p = a === A_WOODS ? 0.2 : (a === A_PINE || a === A_TOWN) ? 0.025 : 0;
+    const a = area[k]; let p = a === A_WOODS ? 0.11 : (a === A_PINE || a === A_TOWN) ? 0.025 : 0;
+    if (a === A_WOODS && (Math.abs(j - 2 * Math.sin(i * 0.11) - 24) < 2 || Math.abs(i - 3 * Math.sin(j * 0.09) - 118) < 2)) p = 0; // dirt trails through the woods
     if (a === A_TOWN && i < 96 && j < 106 && (i < 50 || j < 72)) p = 0.012;
     if (j >= 39 && j <= 47) p = 0;  // keep the road shoulders open
     if (rnd() < p) { grid[k] = TREE; trees.push({ i, j, s: 0.7 + rnd() * 0.7 }); }
   }
 
   // ---- bunkers below the flood wall ----
-  const bl = [[6, 109], [40, 109], [80, 109], [118, 109], [158, 109]];
+  const bl = [[6, 109], [26, 109], [80, 109], [118, 109], [140, 109]];
   const hl2 = [[70, 25, 'manhole'], [8, 59, 'cellar'], [92, 95, 'cellar'], [110, 48, 'manhole'], [151, 26, 'manhole']];
   bl.forEach(([i0, j0], n) => {
     const z = zid++; ZONES[z] = 'Bunker'; openZones.add(z);
     room('Bunker', z, i0, j0, i0 + 7, j0 + 6, 'concrete', 'bunker', 'bunker');
     const [hi, hj, kind] = hl2[n]; const t = grid[idx(hi, hj)]; if (t !== OUT) grid[idx(hi, hj)] = OUT;
+    for (let jj = j0 - 2; jj <= j0 + 8; jj++) for (let ii = i0 - 2; ii <= i0 + 9; ii++) { const kk = idx(ii, jj); if (grid[kk] === TREE) grid[kk] = OUT; }
     hatches.push({ i: hi, j: hj, kind, bunker: n });
     bunkers.push({ i0, j0, i1: i0 + 7, j1: j0 + 6, ladder: { i: i0 + 1, j: j0 + 1 }, crate: { i: i0 + 6, j: j0 + 5 }, hatch: n, zone: z });
     prop(i0 + 6, j0 + 5);
@@ -258,6 +272,7 @@ export function collide(p, r, solidFn) {
   for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
     const k = inb(i, j) ? idx(i, j) : -1; const t = k < 0 ? FENCE : grid[k];
     if (!solidFn(t, k)) continue;
+    if (t === TREE) { const o = treeOff(i, j), tx = i * S + 1 + o[0], tz = j * S + 1 + o[1]; const dx = p.x - tx, dz = p.z - tz, d = Math.hypot(dx, dz), rr = r + TRUNK_R; if (d < rr) { hit = true; const n = d > 1e-4 ? d : 1; p.x += (d > 1e-4 ? dx / n : 1) * (rr - d); p.z += (d > 1e-4 ? dz / n : 0) * (rr - d); } continue; }
     const nx = Math.max(i * S, Math.min(p.x, i * S + S)), nz = Math.max(j * S, Math.min(p.z, j * S + S));
     let dx = p.x - nx, dz = p.z - nz; const d = Math.hypot(dx, dz);
     if (d < r) {
@@ -311,7 +326,7 @@ export function flow(sources) {
   for (const [pi, pj] of sources) { if (!inb(pi, pj)) continue; const s = idx(pi, pj); dist[s] = 0; hpush(0, s); }
   while (hn) {
     const d0 = hd[0]; const k = hpop(); if (d0 > dist[k] || d0 > MAXD) continue;
-    const i = k % GW, j = (k / GW) | 0;
+    const i = k % GW + OI, j = ((k / GW) | 0) + OJ;
     for (let n = 0; n < 8; n++) {
       const di = NB[n][0], dj = NB[n][1]; const ni = i + di, nj = j + dj; if (!inb(ni, nj)) continue; const nk = idx(ni, nj);
       if (di && dj && (stepCost(idx(i + di, j)) >= 2 || stepCost(idx(i, j + dj)) >= 2)) continue;
@@ -322,8 +337,64 @@ export function flow(sources) {
 }
 
 // open ground where zombies can climb out of the dirt
-export const lotSpawns = [];
-export function computeSpawns() {
-  lotSpawns.length = 0;
-  for (let j = 2; j < 105; j += 2) for (let i = 2; i < GW - 2; i += 2) { const k = idx(i, j); if (grid[k] === OUT && !safe[k]) lotSpawns.push([i, j]); }
+// find a spot to climb out of the ground: open outdoor tile, not the safe zone, 12-50 m from the player and
+// reachable by the flow field (so it is never behind a wall or a river of trees)
+export function spawnSpot(px, pz, rnd = Math.random) {
+  for (let pass = 0; pass < 3; pass++) for (let n = 0; n < 60; n++) {
+    const a = rnd() * Math.PI * 2, d = (pass === 2 ? 6 : 12) + rnd() * (pass === 0 ? 38 : 60);
+    const i = Math.floor((px + Math.sin(a) * d) / S), j = Math.floor((pz + Math.cos(a) * d) / S);
+    if (!inb(i, j)) continue; const k = idx(i, j);
+    if (grid[k] !== OUT || safe[k] || zone[k] > 1) continue;
+    if (pass < 2 && !(dist[k] < 1e8)) continue;
+    return [i, j];
+  }
+  return null;
+}
+// ---- the sliding window ----
+const CN = CW * CH;
+const cGrid = new Uint8Array(CN), cZone = new Int16Array(CN), cOwner = new Int16Array(CN), cArea = new Uint8Array(CN), cSurf = new Uint8Array(CN), cSafe = new Uint8Array(CN);
+let procChunk = null; export function setProcProvider(f) { procChunk = f; }
+const ARRS = () => [[grid, cGrid], [zone, cZone], [owner, cOwner], [area, cArea], [surf, cSurf], [safe, cSafe]];
+// copy the core tiles that are inside the window back into the core store (doors opened, pieces built...)
+export function commitCore() {
+  const i0 = Math.max(0, OI), j0 = Math.max(0, OJ), i1 = Math.min(CW, OI + GW), j1 = Math.min(CH, OJ + GH);
+  if (i1 <= i0 || j1 <= j0) return;
+  for (const [w, c] of ARRS()) for (let j = j0; j < j1; j++) { const s0 = idx(i0, j); c.set(w.subarray(s0, s0 + (i1 - i0)), j * CW + i0); }
+}
+function fillRect(i0, j0, i1, j1) { // world tiles [i0,i1) x [j0,j1), all inside the window
+  for (let j = j0; j < j1; j++) {
+    let i = i0;
+    while (i < i1) {
+      if (j >= 0 && j < CH && i >= 0 && i < CW) { const e = Math.min(i1, CW), s0 = idx(i, j), c0 = j * CW + i; for (const [w, c] of ARRS()) w.set(c.subarray(c0, c0 + (e - i)), s0); i = e; continue; }
+      const ci = Math.floor(i / 32), cj = Math.floor(j / 32), ch = procChunk(ci, cj), lj = j - cj * 32;
+      let e = Math.min(i1, (ci + 1) * 32); if (j >= 0 && j < CH && i < 0) e = Math.min(e, 0);
+      for (; i < e; i++) { const l = lj * 32 + (i - ci * 32), k = idx(i, j); grid[k] = ch.grid[l]; zone[k] = ch.zone[l]; owner[k] = -1; area[k] = ch.area[l]; surf[k] = ch.surf[l]; safe[k] = 0; }
+    }
+  }
+}
+export const windowShifts = { n: 0, ms: 0 };
+// slide the window so the player is near its middle. Returns true when it moved.
+export function recenter(x, z, force) {
+  const pi = Math.floor(x / S), pj = Math.floor(z / S);
+  if (!force && Math.abs(pi - (OI + GW / 2)) < 64 && Math.abs(pj - (OJ + GH / 2)) < 64) return false;
+  const t0 = performance.now();
+  commitCore();
+  const nOI = Math.round((pi - GW / 2) / 32) * 32, nOJ = Math.round((pj - GH / 2) / 32) * 32;
+  const di = nOI - OI, dj = nOJ - OJ;
+  if (force || Math.abs(di) >= GW || Math.abs(dj) >= GH) { OI = nOI; OJ = nOJ; fillRect(OI, OJ, OI + GW, OJ + GH); }
+  else {
+    const w = GW - Math.abs(di), dst = Math.max(0, -di), src = Math.max(0, di);
+    for (const [a] of ARRS()) {
+      if (dj >= 0) for (let r = 0; r < GH - dj; r++) a.copyWithin(r * GW + dst, (r + dj) * GW + src, (r + dj) * GW + src + w);
+      else for (let r = GH - 1; r >= -dj; r--) a.copyWithin(r * GW + dst, (r + dj) * GW + src, (r + dj) * GW + src + w);
+    }
+    OI = nOI; OJ = nOJ;
+    // fill the strips that came into view
+    if (dj > 0) fillRect(OI, OJ + GH - dj, OI + GW, OJ + GH); else if (dj < 0) fillRect(OI, OJ, OI + GW, OJ - dj);
+    const ja = dj > 0 ? OJ : OJ - dj, jb = dj > 0 ? OJ + GH - dj : OJ + GH;
+    if (di > 0) fillRect(OI + GW - di, ja, OI + GW, jb); else if (di < 0) fillRect(OI, ja, OI - di, jb);
+  }
+  dist.fill(1e9);
+  windowShifts.n++; windowShifts.ms = performance.now() - t0;
+  return true;
 }

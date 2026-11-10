@@ -1,7 +1,7 @@
 // Builds the Lockwood Motel meshes from the grid, plus props, lights, sky and machine placements.
 import * as THREE from 'three';
 import { T } from './tex.js';
-import { S, GW, GH, WALL_H, OUT, FLOOR, WALL, WIN, DOOR, FENCE, PROP, GLASS, OPEN, grid, zone, idx, at, inb, doors, windows, rooms, prop, cx, boxSpotList } from './map.js';
+import { S, CW, CH, WALL_H, OUT, FLOOR, WALL, WIN, DOOR, FENCE, PROP, GLASS, OPEN, grid, zone, idx, at, inb, doors, windows, rooms, prop, cx, boxSpotList } from './map.js';
 import { T2 } from './tex2.js';
 import { buildTown } from './town.js';
 import { makeBox, makeCrate, makePerk, makeSwitch, makeForge, makeCar, B, C, bake, merge } from './models.js';
@@ -122,10 +122,12 @@ export function buildWorld(scene, env, q) {
   const bz = (i, j) => { for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const t = at(i + di, j + dj); if (t === FLOOR || t === OPEN) return zone[idx(i + di, j + dj)]; } return 0; };
 
   // ---- ground ----
-  const lotW = GW * S, lotH = GH * S;
-  const grassM = std({ map: rep(T2.grass(), lotW / 6, lotH / 6), roughness: 1, color: 0xa8a890 });
-  const ground = add(new THREE.Mesh(new THREE.PlaneGeometry(lotW, lotH), grassM)); ground.rotation.x = -Math.PI / 2; ground.position.set(lotW / 2, 0, lotH / 2); ground.receiveShadow = true;
-  const outer = add(new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), std({ color: 0x15140f, roughness: 1 }))); outer.rotation.x = -Math.PI / 2; outer.position.set(lotW / 2, -0.02, lotH / 2);
+  const lotW = CW * S, lotH = CH * S;
+  // one big grass plane that follows the camera in whole texture tiles, so the ground never ends
+  const GSZ = 1500, grassM = std({ map: rep(T2.grass(), GSZ / 6, GSZ / 6), roughness: 1, color: 0xa8a890 });
+  const ground = add(new THREE.Mesh(new THREE.PlaneGeometry(GSZ, GSZ), grassM)); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; ground.matrixAutoUpdate = true;
+  W_.followGround = (x, z) => ground.position.set(Math.round(x / 6) * 6, 0, Math.round(z / 6) * 6);
+  W_.followGround(60, 60);
   W_.asphaltM = std({ map: T.asphalt(), normalMap: T.asphaltN(), normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.82, color: 0x9a9a9a });
   const dirtM = new THREE.MeshStandardMaterial({ map: T.dirt(), transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1 });
   for (const [x, z, s] of [[8, 8, 10], [80, 10, 12], [44, 4, 9], [6, 40, 9], [84, 36, 9], [30, 74, 9], [52, 34, 8], [22, 40, 7]]) { const d = add(new THREE.Mesh(new THREE.PlaneGeometry(s, s), dirtM)); d.rotation.x = -Math.PI / 2; d.position.set(x, 0.015, z); d.receiveShadow = true; }
@@ -133,7 +135,7 @@ export function buildWorld(scene, env, q) {
   // ---- walls, windows, doors, ceilings, floors ----
   const buckets = new Map(); const bk = m => { if (!buckets.has(m)) buckets.set(m, new Bucket()); return buckets.get(m); };
   const wallish = t => t === WALL || t === WIN || t === DOOR || t === GLASS || t === OPEN;
-  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
     const t = at(i, j); const x0 = i * S, x1 = x0 + S, z0 = j * S, z1 = z0 + S;
     if (t === FLOOR || (t === PROP && zone[idx(i, j)] > 3 && rooms.some(r => i >= r.i0 && i <= r.i1 && j >= r.j0 && j <= r.j1)) || (t === PROP && zone[idx(i, j)] >= 0 && zone[idx(i, j)] !== 1 && zone[idx(i, j)] <= 3)) { bk(M.ceiling).flat(x0, z0, x1, z1, WALL_H, false); bk(M.roof).flat(x0, z0, x1, z1, WALL_H + 0.25, true); continue; }
     if (!wallish(t)) continue;
@@ -164,7 +166,7 @@ export function buildWorld(scene, env, q) {
     const b = bk(m); b.flat(r.i0 * S, r.j0 * S, (r.i1 + 1) * S, (r.j1 + 1) * S, 0.01, true, fk === 'checker' ? 1 / 4 : fk === 'mall' || fk === 'shop' ? 1 / 4 : 1 / 3);
   }
   // door and window floor strips
-  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const t = at(i, j); if (t === DOOR || t === OPEN || t === WIN || t === GLASS) bk(M.concrete).flat(i * S, j * S, i * S + S, j * S + S, 0.012, true); }
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) { const t = at(i, j); if (t === DOOR || t === OPEN || t === WIN || t === GLASS) bk(M.concrete).flat(i * S, j * S, i * S + S, j * S + S, 0.012, true); }
   for (const [m, b] of buckets) { const mesh = b.mesh(m); add(mesh); }
 
   // window frames + planks
@@ -207,8 +209,10 @@ export function buildWorld(scene, env, q) {
   // ---- sky ----
   const sky = add(new THREE.Mesh(new THREE.SphereGeometry(700, 24, 16), new THREE.MeshBasicMaterial({ map: T.sky(), side: THREE.BackSide, fog: false, depthWrite: false }))); sky.position.set(lotW / 2, 0, lotH / 2); sky.renderOrder = -1;
   const starG = new THREE.BufferGeometry(); const sp = []; for (let n = 0; n < 900; n++) { const a = r() * Math.PI * 2, el = 0.08 + r() * 1.4; sp.push(Math.cos(a) * Math.cos(el) * 650 + lotW / 2, Math.sin(el) * 650, Math.sin(a) * Math.cos(el) * 650 + lotH / 2); } starG.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
-  add(new THREE.Points(starG, new THREE.PointsMaterial({ color: 0xc8d0ff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8, depthWrite: false })));
+  const stars = add(new THREE.Points(starG, new THREE.PointsMaterial({ color: 0xc8d0ff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8, depthWrite: false })));
   const moon = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: T.moon(), fog: false, depthWrite: false, transparent: true }))); moon.scale.set(90, 90, 1); moon.position.set(lotW / 2 - 280, 330, lotH / 2 - 400);
+  // the sky goes wherever you go
+  W_.followSky = (x, z) => { sky.position.set(x, 0, z); stars.position.set(x - lotW / 2, 0, z - lotH / 2); moon.position.set(x - 280, 330, z - 400); };
 
   // ---- props ----
   const glowMat = (c, o = 0.9) => new THREE.SpriteMaterial({ map: T.glow(), color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false });

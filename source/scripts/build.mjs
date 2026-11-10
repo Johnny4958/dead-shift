@@ -3,7 +3,7 @@ import { build } from 'esbuild';
 import fs from 'fs';
 fs.rmSync('dist', { recursive: true, force: true });
 fs.mkdirSync('dist/assets', { recursive: true });
-await build({ entryPoints: ['src/main.js'], bundle: true, minify: true, format: 'esm', outfile: 'dist/main.js', target: ['es2020', 'safari15'], legalComments: 'none' });
+await build({ entryPoints: ['src/main.js'], bundle: true, minify: !process.env.DEV, sourcemap: !!process.env.DEV, format: 'esm', outfile: 'dist/main.js', target: ['es2020', 'safari15'], legalComments: 'none' });
 for (const f of fs.readdirSync('assets')) fs.copyFileSync('assets/' + f, 'dist/assets/' + f);
 let html = fs.readFileSync('index.html', 'utf8');
 html = html.replace('src="main.js"', 'src="main.js?v=' + Date.now().toString(36) + '"');

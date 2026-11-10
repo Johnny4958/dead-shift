@@ -1,9 +1,13 @@
 // Dead Shift: core game loop, zombies, rounds, weapons, buying, building, car
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { inp, took, endFrame, setupInput, setDevice, pollKeyboard, pollGamepad, rumble, touchSprint } from './input.js';
-import { initAudio, setVolume, sfx, setEngine } from './audio.js';
-import { S, GW, GH, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, tileOf, cx, doors, windows, openZones, buildMap, computeSpawns, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, lotSpawns } from './map.js';
+import { inp, took, endFrame, setupInput, setDevice, pollKeyboard, pollGamepad, rumble, touchSprint, resetDriveTouch } from './input.js';
+import { initAudio, setVolume, sfx, setEngine, setSqueal } from './audio.js';
+import { initCarFx, clearCarFx, stepCar, unstick, idleCarFx, carBlocked, roomy } from './car.js';
+import { S, GW, GH, surf, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, at, tileOf, cx, doors, windows, openZones, buildMap, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, spawnSpot, recenter, setProcProvider, ijOf, TREE, TRUNK_R, treeOff, safe, area, AREA_NAMES, windowShifts, rooms, WALL, GLASS, FENCE } from './map.js';
+import { genChunk, initProc, roadAt, furnishFixed } from './proc.js';
+import { initStream, updateStream, readsNear, live as liveChunks, stats as streamStats } from './stream.js';
+import { pushOut } from './props.js';
 import { makeZombie, animZombie, warmZombies, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo } from './models.js';
 import { T, setAniso } from './tex.js';
 import { T2 } from './tex2.js';
@@ -35,6 +39,26 @@ vmScene.add(new THREE.HemisphereLight(0xb0b8d0, 0x302820, 1.4)); const vmDir = n
 
 buildMap();
 const WD = buildWorld(scene, env, qual());
+setProcProvider(genChunk); initProc(scene); initStream(scene); initCarFx(scene);
+// furniture for the original Lockwood buildings (houses, shops, police, bar, school, church, cabin, garage), kept clear of every doorway,
+// window, wall-buy, perk, box spot and existing prop
+const LW_FURN = (() => { try {
+  const KIND = { house: 'house', police: 'police', bar: 'bar', church: 'church', school: 'school', cabin: 'cabin', garage: 'garage', food: 'diner' };
+  const byName = { 'Gas Station': 'gas', 'Pharmacy': 'pharmacy', "Hank's Market": 'store', 'Hardware': 'hardware', 'Sporting Goods': 'hardware', 'Department Store': 'store' };
+  const pts = []; const P2 = (x, z, r = 1.7) => pts.push([x, z, r]);
+  for (const w of WD.wallbuys || []) P2(w.use.x, w.use.z, 2.2); for (const p of WD.perks || []) P2(p.use.x, p.use.z, 2.2); for (const b of WD.boxSpots || []) P2(b.use.x, b.use.z, 2.4);
+  if (WD.swUse) P2(WD.swUse.x, WD.swUse.z, 2.2); if (WD.forgeUse) P2(WD.forgeUse.x, WD.forgeUse.z, 2.4);
+  const list = [];
+  for (const rm of rooms) {
+    if (rm.z <= 3) continue; const kind = byName[rm.name] || KIND[rm.kind]; if (!kind) continue;
+    const keep = pts.filter(p => p[0] > rm.i0 * S - 3 && p[0] < (rm.i1 + 1) * S + 3 && p[1] > rm.j0 * S - 3 && p[1] < (rm.j1 + 1) * S + 3);
+    for (let j = rm.j0 - 1; j <= rm.j1 + 1; j++) for (let i = rm.i0 - 1; i <= rm.i1 + 1; i++) { const t = at(i, j), edge = i < rm.i0 || i > rm.i1 || j < rm.j0 || j > rm.j1;
+      if (edge ? (t !== WALL && t !== GLASS && t !== FENCE) : t !== FLOOR) keep.push([cx(i), cx(j), edge ? 1.9 : 1.3]); }
+    list.push({ kind, x0: rm.i0 * S, z0: rm.j0 * S, x1: (rm.i1 + 1) * S, z1: (rm.j1 + 1) * S, keep, story: { photo: rm.kind === 'house' } });
+  }
+  return { rooms: list.length, ...furnishFixed(list) };
+} catch (e) { console.warn('lockwood furniture failed', e); return { rooms: 0, error: String(e) }; } })();
+recenter(60, 30, true);
 // night, but readable: lift the ambient and moon so the lot is visible on phones
 WD.hemi.intensity = 1.3; WD.moonL.intensity = 1.2; scene.environment = env; scene.environmentIntensity = 0.22;
 let pixelScale = 1;
@@ -76,8 +100,7 @@ const V3 = new THREE.Vector3(), V3b = new THREE.Vector3();
 const G = { state: 'title', t: 0, round: 0, toSpawn: 0, spawnT: 0, between: false, betweenT: 0, kills: 0, heads: 0, points: 0, power: false, flowT: 0, flowDirty: true, lastFlowK: -1, insta: 0, dbl: 0, pupsRound: 0, repairPts: 0, god: false, mapDirty: true };
 const P = { x: 0, z: 0, y: 0, vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, guns: [], cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, perks: new Set(), view: 'fp', bob: 0, ads: 0, recoil: 0, repT: 0, driving: false, semi: false, heartT: 0, speed: 0 };
 const zombies = []; const pups = []; const gases = []; const nades = []; const pieces = [];
-computeSpawns();
-const spawns = lotSpawns.filter(([i, j]) => grid[idx(i, j)] === OUT);
+setProcProvider(genChunk);
 const startPos = { x: cx(11), z: cx(10) }; // you wake up in the motel garage
 
 // viewmodel
@@ -123,16 +146,19 @@ function updHud() {
   const left = G.toSpawn + zombies.filter(z => !z.dead).length; $('zcount').textContent = G.between ? 'Next round soon' : 'Zombies left: ' + left;
 }
 // minimap
-const mmC = $('minimap'), mm = mmC.getContext('2d'); const mapImg = document.createElement('canvas'); const PPM = 3.6;
-function drawMapImg() {
-  mapImg.width = GW * S * PPM; mapImg.height = GH * S * PPM; const x = mapImg.getContext('2d');
-  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const t = grid[idx(i, j)]; x.fillStyle = t === OUT ? '#20261c' : t === FLOOR ? (openZones.has(zone[idx(i, j)]) ? '#6a6458' : '#3a3630') : t === WIN ? '#c09040' : t === DOOR ? '#d0b050' : t === BWALL || t === BDOOR ? '#a07040' : t === SPIKE ? '#805030' : t === 6 ? '#2c3028' : '#9a9a9a'; x.fillRect(i * S * PPM, j * S * PPM, S * PPM + 0.5, S * PPM + 0.5); }
+const mmC = $('minimap'), mm = mmC.getContext('2d'); const mapImg = document.createElement('canvas'); const PPM = 3.6; let mapO = [0, 0];
+const MMCOL = (() => { const h = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)]; return { out: h('#20261c'), road: h('#3a3c3a'), dirt: h('#3a3226'), floorO: h('#6a6458'), floor: h('#3a3630'), win: h('#c09040'), door: h('#d0b050'), bw: h('#a07040'), spike: h('#805030'), tree: h('#142010'), wall: h('#9a9a9a') }; })();
+function drawMapImg() { // 1 pixel per tile for the whole window; scaled up when drawn
+  if (mapImg.width !== GW) { mapImg.width = GW; mapImg.height = GH; }
+  const x = mapImg.getContext('2d'), im = x.createImageData(GW, GH), d = im.data;
+  for (let k = 0; k < GW * GH; k++) { const t = grid[k]; const c = t === OUT ? (surf[k] === 2 || surf[k] === 1 ? MMCOL.road : surf[k] === 3 ? MMCOL.dirt : MMCOL.out) : t === FLOOR ? (openZones.has(zone[k]) ? MMCOL.floorO : MMCOL.floor) : t === WIN ? MMCOL.win : t === DOOR ? MMCOL.door : t === BWALL || t === BDOOR ? MMCOL.bw : t === SPIKE ? MMCOL.spike : t === TREE ? MMCOL.tree : t === 6 ? MMCOL.out : MMCOL.wall; d[k * 4] = c[0]; d[k * 4 + 1] = c[1]; d[k * 4 + 2] = c[2]; d[k * 4 + 3] = 255; }
+  x.putImageData(im, 0, 0); mapO = [ijOf(0)[0], ijOf(0)[1]];
   G.mapDirty = false;
 }
 function drawMinimap() {
   if (G.mapDirty) drawMapImg();
   const w = mmC.width, px = P.driving ? car.x : P.x, pz = P.driving ? car.z : P.z, yaw = P.driving ? car.h : P.yaw;
-  mm.clearRect(0, 0, w, w); mm.save(); mm.translate(w / 2, w / 2); mm.rotate(yaw); mm.drawImage(mapImg, -px * PPM, -pz * PPM);
+  mm.clearRect(0, 0, w, w); mm.save(); mm.translate(w / 2, w / 2); mm.rotate(yaw); mm.imageSmoothingEnabled = false; mm.drawImage(mapImg, (mapO[0] * S - px) * PPM, (mapO[1] * S - pz) * PPM, GW * S * PPM, GH * S * PPM);
   mm.fillStyle = '#ff3030'; for (const z of zombies) if (!z.dead) { mm.beginPath(); mm.arc((z.x - px) * PPM, (z.z - pz) * PPM, 4, 0, 7); mm.fill(); }
   mm.fillStyle = '#5ab0ff'; const b = WD.boxSpots[box.spot].pos; mm.fillRect((b.x - px) * PPM - 5, (b.z - pz) * PPM - 5, 10, 10);
   mm.fillStyle = '#ffd040'; mm.fillRect((car.x - px) * PPM - 4, (car.z - pz) * PPM - 7, 8, 14);
@@ -142,7 +168,7 @@ function drawMinimap() {
 // ---------------- world objects state ----------------
 const box = { spot: 0, state: 'idle', t: 0, key: null, uses: 0, cycleT: 0, model: null };
 function placeBox() { const s = WD.boxSpots[box.spot]; WD.box.group.position.set(s.pos.x, 0, s.pos.z); WD.box.group.rotation.y = s.rot; WD.boxSpots.forEach((q, i) => q.crate.visible = i !== box.spot); }
-const car = { x: 0, z: 0, h: 0, v: 0, steer: 0 };
+const car = { x: 0, z: 0, h: 0, v: 0, vx: 0, vz: 0, yr: 0, steer: 0, slip: 0, squeal: 0, stuckT: 0, launch: 0 };
 function findCarSpot() { for (const [i, j] of [[27, 12], [24, 11], [30, 14], [20, 16], [32, 8]]) { let ok = true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (!inb(i + a, j + b) || grid[idx(i + a, j + b)] !== OUT) ok = false; if (ok) return { x: cx(i), z: cx(j) }; } return { x: cx(27), z: cx(12) }; }
 const carStart = findCarSpot();
 const forge = { t: 0 };
@@ -169,13 +195,14 @@ function clearAll() {
   for (const p of pups) scene.remove(p.g); pups.length = 0;
   for (const g of gases) scene.remove(g.sp); gases.length = 0;
   for (const n of nades) scene.remove(n.m); nades.length = 0;
-  for (const p of pieces) { scene.remove(p.g); for (const [i, j] of [[p.i, p.j]]) { grid[idx(i, j)] = p.under; owner[idx(i, j)] = -1; } } pieces.length = 0;
+  for (const p of pieces) { scene.remove(p.g); if (inb(p.i, p.j)) { grid[idx(p.i, p.j)] = p.under; owner[idx(p.i, p.j)] = -1; } } pieces.length = 0;
 }
 function newGame() {
   clearAll();
-  buildMap(); // restores doors/windows/grid
+  buildMap(); // restores doors/windows/grid (window back at the origin)
   // props placed by the world are lost by buildMap; re-mark them
-  for (const k of propTiles) grid[k] = 6;
+  for (const [i, j] of propTiles) grid[idx(i, j)] = 6;
+  recenter(startPos.x, startPos.z, true);
   for (const d of doors) WD.doorMeshes[d.id].visible = true;
   for (const w of windows) { w.planks = 6; WD.planks[w.id].list.forEach(p => p.visible = true); }
   Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0, god: false });
@@ -183,11 +210,11 @@ function newGame() {
   P.perks.clear(); P.guns = [makeGun('pistol')]; setVmGun();
   setPower(false);
   box.spot = 0; box.state = 'idle'; box.uses = 0; if (box.model) { WD.box.gunSlot.remove(box.model); box.model = null; } WD.box.lid.rotation.x = 0; placeBox();
-  Object.assign(car, { x: carStart.x, z: carStart.z, h: 0, v: 0 }); setEngine(false);
+  Object.assign(car, { x: carStart.x, z: carStart.z, h: 0, v: 0, vx: 0, vz: 0, yr: 0, steer: 0, stuckT: 0 }); setEngine(false); setSqueal(0); clearCarFx();
   build.on = false; document.body.classList.remove('building', 'driving'); $('buildbar').classList.add('hidden'); $('carhud').classList.add('hidden');
   startRound(1); updHud();
 }
-const propTiles = []; for (let k = 0; k < grid.length; k++) if (grid[k] === 6) propTiles.push(k);
+const propTiles = []; for (let k = 0; k < grid.length; k++) if (grid[k] === 6) propTiles.push(ijOf(k));
 const trophySpots = (() => { const out = [], si = tileOf(startPos.x), sj = tileOf(startPos.z); const c = [];
   for (let di = -5; di <= 5; di++) for (let dj = -5; dj <= 5; dj++) { const i = si + di, j = sj + dj; if (!inb(i, j) || Math.hypot(di, dj) < 1.5) continue; let ok = true; for (let a = -1; a <= 1 && ok; a++) for (let b = -1; b <= 1; b++) if (!inb(i + a, j + b) || grid[idx(i + a, j + b)] !== FLOOR) { ok = false; break; } if (ok) c.push([Math.hypot(di, dj), i, j]); }
   c.sort((p, q) => p[0] - q[0]); for (const [, i, j] of c.slice(0, 6)) out.push({ x: cx(i), z: cx(j) }); if (!out.length) out.push({ x: startPos.x + 1, z: startPos.z + 1 }); return out; })();
@@ -223,7 +250,7 @@ function spawnZombie(force) {
   let type = 'walker'; if (r >= 5 && roll < 0.05) type = 'screamer'; else if (r >= 6 && roll < 0.15) type = 'toxic'; else if (r >= 4 && roll < 0.28) type = 'fat'; else if (r >= 3 && roll < 0.46) type = 'runner';
   if (force) type = force;
   const px = P.driving ? car.x : P.x, pz = P.driving ? car.z : P.z;
-  let cand = spawns.filter(([i, j]) => { const d = Math.hypot(cx(i) - px, cx(j) - pz); return d > 12 && d < 50; }); if (!cand.length) cand = spawns.filter(([i, j]) => Math.hypot(cx(i) - px, cx(j) - pz) > 8); if (!cand.length) cand = spawns;
+  const spot = spawnSpot(px, pz); const cand = spot ? [spot] : [[tileOf(px) + 6, tileOf(pz) + 6]];
   const [si, sj] = pick(cand); let x = cx(si) + (R() - 0.5) * 1.4, z = cx(sj) + (R() - 0.5) * 1.4;
   const m = makeZombie(type); let hp = zHp(r), sp = Math.min(1.0 + r * 0.1, 1.9) * (0.85 + R() * 0.3);
   if (r >= 8 && type === 'walker' && R() < Math.min(0.6, (r - 7) * 0.08)) sp = 2.8 + R() * 0.6;
@@ -277,7 +304,7 @@ function updZombie(z, dt, tx, tz) {
   const p = { x: z.x, z: z.z }; collide(p, 0.3, solidZombie); z.x = p.x; z.z = p.z;
   // progress / stuck
   const d = dist[k]; if (d < z.best - 0.5) { z.best = d; z.stuckT = 0; } else z.stuckT += dt;
-  if (z.stuckT > 22 && dp > 18) { const [si, sj] = pick(spawns); z.x = cx(si); z.z = cx(sj); z.best = 1e9; z.stuckT = 0; z.state = 'rise'; z.t = 0; }
+  if ((z.stuckT > 22 && dp > 18) || dp > 140 || !inb(tileOf(z.x), tileOf(z.z))) { const sp = spawnSpot(P.x, P.z) || [tileOf(P.x) + 8, tileOf(P.z)]; const [si, sj] = sp; z.x = cx(si); z.z = cx(sj); z.best = 1e9; z.stuckT = 0; z.state = 'rise'; z.t = 0; }
   m.root.position.set(z.x, 0, z.z); m.root.rotation.y = z.yaw;
   z.cur = lerp(z.cur, attacking ? 0 : speed, Math.min(1, dt * 6));
   animZombie(m, G.t, z.cur, Math.max(attacking ? 0.5 + 0.5 * Math.sin(G.t * 6) : 0, z.atk > 0 ? Math.sin(z.atk * Math.PI) : 0), onT === WIN);
@@ -431,7 +458,7 @@ function throwNade() {
   nades.push({ m, x: V3b.x + V3.x * 0.5, y: V3b.y, z: V3b.z + V3.z * 0.5, vx: V3.x * 14, vy: V3.y * 14 + 3, vz: V3.z * 14, t: 2.2 });
 }
 function updNades(dt) {
-  for (let i = nades.length - 1; i >= 0; i--) { const n = nades[i]; n.t -= dt; n.vy -= 18 * dt; const nx = n.x + n.vx * dt, nz = n.z + n.vz * dt; const tt = grid[idx(clamp(tileOf(nx), 0, GW - 1), clamp(tileOf(nz), 0, GH - 1))]; if (solidPlayer(tt) || tt === WIN) { n.vx *= -0.4; n.vz *= -0.4; } else { n.x = nx; n.z = nz; } n.y += n.vy * dt; if (n.y < 0.08) { n.y = 0.08; n.vy *= -0.35; n.vx *= 0.7; n.vz *= 0.7; } n.m.position.set(n.x, n.y, n.z);
+  for (let i = nades.length - 1; i >= 0; i--) { const n = nades[i]; n.t -= dt; n.vy -= 18 * dt; const nx = n.x + n.vx * dt, nz = n.z + n.vz * dt; const tt = at(tileOf(nx), tileOf(nz)); if (solidPlayer(tt) || tt === WIN) { n.vx *= -0.4; n.vz *= -0.4; } else { n.x = nx; n.z = nz; } n.y += n.vy * dt; if (n.y < 0.08) { n.y = 0.08; n.vy *= -0.35; n.vx *= 0.7; n.vz *= 0.7; } n.m.position.set(n.x, n.y, n.z);
     if (n.t <= 0) { scene.remove(n.m); nades.splice(i, 1); sfx.boom(); rumble(1, 1, 300); spriteFx(T.glow(), 0xffa040, n.x, 1, n.z, 3, 0.4, { add: true, grow: 10 }); spriteFx(T.puff(), 0x505050, n.x, 1.2, n.z, 2, 1.6, { grow: 3, vy: 0.8, op: 0.8 });
       for (const z of zombies) { if (z.dead) continue; const d = Math.hypot(z.x - n.x, z.z - n.z); if (d < 5.5) damageZombie(z, (900 + G.round * 120) * (1 - d / 6), false, 'nade'); }
       const pd = Math.hypot(P.x - n.x, P.z - n.z); if (pd < 3.5 && !P.driving) hurt(25 * (1 - pd / 3.5)); } }
@@ -442,9 +469,19 @@ function near(p, r) { return Math.hypot(p.x - P.x, p.z - P.z) < r; }
 function prompt(txt) { $('prompt').innerHTML = txt; }
 function buy(cost) { if (G.points < cost) { sfx.deny(); toast('Not enough points'); return false; } addPts(cost, true); sfx.buy(); updHud(); return true; }
 const K = () => `<span class="k">${keyName('use')}</span>`;
+let readOpen = null;
+function showRead(r) { const el = $('readbox'); el.innerHTML = '<div>' + r.text.replace(/</g, '&lt;') + '</div><small>' + (inp.device === 'touch' ? 'Tap USE to close, or walk away' : 'Press ' + keyName('use') + ' to close') + '</small>'; el.classList.remove('hidden'); el.classList.toggle('radio', !!r.radio); readOpen = { r, t: performance.now() }; if (r.radio) sfx.radio(); else sfx.click?.(); }
+function closeRead() { $('readbox').classList.add('hidden'); readOpen = null; }
+function readables(use) {
+  if (readOpen) return '';
+  const r = readsNear(P.x, P.z); if (!r) return '';
+  if (use) { showRead(r); return ''; }
+  return K() + (r.radio ? ' Listen to the radio' : r.text.startsWith('Journal') ? ' Read the journal page' : ' Read the note left here');
+}
 function interact(dt) {
   let txt = ''; const use = took('use'), hold = inp.use;
   if (P.driving) { prompt(K() + ' Get out'); if (use) exitCar(); return; }
+  if (readOpen) { const r = readOpen.r; if (Math.hypot(r.x - P.x, r.z - P.z) > (r.r || 3) + 2 || performance.now() - readOpen.t > 12000) closeRead(); else if (use) { closeRead(); prompt(''); return; } }
   // window repair
   let repairing = false;
   for (const w of windows) { const ip = { x: cx(w.i) - w.outDir[0] * 1.1, z: cx(w.j) - w.outDir[1] * 1.1 }; if (w.planks < 6 && near(ip, 1.6)) { txt = 'Hold ' + K() + ' to rebuild the barrier'; if (hold) { repairing = true; P.repT += dt; if (P.repT > 0.7) { P.repT = 0; WD.planks[w.id].list[w.planks].visible = true; w.planks++; sfx.nail(); G.flowDirty = true; if (G.repairPts < 500) { addPts(10); G.repairPts += 10; } updHud(); } } break; } }
@@ -460,7 +497,8 @@ function interact(dt) {
     else txt = '';
   } }
   if (!txt && near(car, 3.2)) { txt = K() + ' Drive the car'; if (use) enterCar(); }
-  prompt(txt);
+  if (!txt) txt = readables(use);
+  prompt(txt || (build.on ? build.promptTxt || '' : ''));
 }
 function openDoor(d) { d.open = true; for (const [i, j] of d.tiles) { grid[idx(i, j)] = FLOOR; zone[idx(i, j)] = d.zone; } openZones.add(d.zone); WD.doorMeshes[d.id].visible = false; sfx.door(); G.flowDirty = true; G.mapDirty = true; toast(d.label + ' opened'); }
 function openBox() { box.state = 'rolling'; box.t = 0; box.cycleT = 0; box.uses++; sfx.box(); }
@@ -477,54 +515,104 @@ function updBox(dt) {
 }
 
 // ---------------- building ----------------
-function toggleBuild() { build.on = !build.on; document.body.classList.toggle('building', build.on); $('buildbar').classList.toggle('hidden', !build.on); if (!build.on && build.ghost) build.ghost.visible = false; drawBuildbar(); if (build.on) toast('Build mode: aim at the ground, ' + (inp.device === 'touch' ? 'tap FIRE to place, SWAP to change piece' : inp.device === 'pad' ? 'R2 to place, Triangle to change piece' : 'click to place, Q to change piece')); }
-function drawBuildbar() { $('buildbar').innerHTML = PIECES.map((p, i) => `<div class="${i === build.sel ? 'sel' : ''}">${p.name}<span>${p.cost}</span></div>`).join(''); }
-const ghostMat = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.35, depthWrite: false });
+function toggleBuild() { build.on = !build.on; document.body.classList.toggle('building', build.on); $('buildbar').classList.toggle('hidden', !build.on); if (!build.on) { if (build.ghost) build.ghost.visible = false; if (build.ring) build.ring.visible = false; } drawBuildbar(); if (build.on) toast('Build mode: ' + (inp.device === 'touch' ? 'tap a piece below, aim at the ground, then tap PLACE' : inp.device === 'pad' ? 'Triangle changes piece, R2 places, Square rotates' : 'click a piece or press 1-3 / Q to choose, click to place, T rotates') ); }
+function drawBuildbar() { const pc = PIECES; $('buildbar').innerHTML = pc.map((p, i) => `<div data-bi="${i}" class="${i === build.sel ? 'sel' : ''}${G.points < p.cost ? ' poor' : ''}"><b>${i + 1}</b> ${p.name}<span>${p.cost} pts</span></div>`).join(''); build.barPts = G.points < pc[0].cost ? 0 : G.points; }
+function selectPiece(i) { if (i === build.sel || i < 0 || i >= PIECES.length) return; build.sel = i; drawBuildbar(); if (build.ghost) { scene.remove(build.ghost); build.ghost = null; } sfx.click?.(); toast(PIECES[i].name + ' selected'); }
+document.getElementById('buildbar')?.addEventListener('click', e => { const el = e.target.closest('[data-bi]'); if (el) { inp.buildSel = +el.dataset.bi; e.stopPropagation(); } });
+const ghostMat = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.42, depthWrite: false });
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
+function makeGhost(kind) { const g = new THREE.Group(); const geo = pieceGeo(kind); g.add(new THREE.Mesh(geo.wood, ghostMat)); if (geo.metal) g.add(new THREE.Mesh(geo.metal, ghostMat)); if (kind === 'door') { const gm = new THREE.Mesh(pieceGeo('gate').wood, ghostMat); gm.position.x = -0.88; g.add(gm); } g.traverse(o => { o.renderOrder = 2; }); return g; }
+function buildReason(pc, gi, gj) {
+  if (!inb(gi, gj)) return 'Too far out';
+  const t = grid[idx(gi, gj)];
+  if (tileOf(P.x) === gi && tileOf(P.z) === gj) return 'You are standing there - step back';
+  if (t !== OUT && t !== FLOOR) return t === BWALL || t === BDOOR || t === SPIKE ? 'Already built here' : 'Something is in the way';
+  if (zombies.some(z => !z.dead && tileOf(z.x) === gi && tileOf(z.z) === gj)) return 'A zombie is in the way';
+  if (Math.abs(cx(gi) - car.x) < 2.6 && Math.abs(cx(gj) - car.z) < 2.6) return 'The car is in the way';
+  if (pushOut({ x: cx(gi), z: cx(gj) }, 0.7)) return 'Something is in the way';
+  if (G.points < pc.cost) return 'Need ' + pc.cost + ' points (you have ' + G.points + ')';
+  return '';
+}
 function updBuild() {
-  if (!build.on) return;
-  if (took('swap')) { build.sel = (build.sel + 1) % PIECES.length; drawBuildbar(); if (build.ghost) { scene.remove(build.ghost); build.ghost = null; } }
-  if (took('rotate')) build.rot ^= 1;
+  if (!build.on) { if (build.ring) build.ring.visible = false; return; }
+  if (took('swap')) selectPiece((build.sel + 1) % PIECES.length);
+  for (let n = 0; n < PIECES.length; n++) if (took('slot' + (n + 1))) selectPiece(n);
+  if (inp.buildSel != null) { selectPiece(inp.buildSel); inp.buildSel = null; }
+  if (took('rotate')) { build.rot ^= 1; }
+  if ((build.barPts === 0) !== (G.points < PIECES[0].cost) || G.points !== build.lastPts) { build.lastPts = G.points; drawBuildbar(); }
   const pc = PIECES[build.sel];
-  if (!build.ghost) { build.ghost = new THREE.Mesh(pieceGeo(pc.kind).wood, ghostMat); scene.add(build.ghost); }
-  const fx_ = -Math.sin(P.yaw), fz = -Math.cos(P.yaw); const gi = tileOf(P.x + fx_ * 2.4), gj = tileOf(P.z + fz * 2.4); const k = inb(gi, gj) ? idx(gi, gj) : -1;
-  const t = k >= 0 ? grid[k] : -1; const pt = tileOf(P.x) === gi && tileOf(P.z) === gj;
-  build.ok = (t === OUT || t === FLOOR) && !pt && !zombies.some(z => !z.dead && tileOf(z.x) === gi && tileOf(z.z) === gj) && !(Math.abs(cx(gi) - car.x) < 2.6 && Math.abs(cx(gj) - car.z) < 2.6);
-  build.gi = gi; build.gj = gj; build.ghost.visible = true; build.ghost.position.set(cx(gi), 0, cx(gj)); build.ghost.rotation.y = build.rot ? Math.PI / 2 : 0; ghostMat.color.set(build.ok && G.points >= pc.cost ? 0x40ff60 : 0xff4030);
-  prompt(pc.name + ' [' + pc.cost + ']' + (build.ok ? '' : ' - cannot build here'));
-  if (inp.fire && !P.semi) { P.semi = true; if (!build.ok) sfx.deny(); else if (buy(pc.cost)) placePiece(pc, gi, gj, build.rot); }
+  if (!build.ghost) { build.ghost = makeGhost(pc.kind); scene.add(build.ghost); }
+  if (!build.ring) { const r = new THREE.Mesh(new THREE.RingGeometry(1.25, 1.42, 4, 1), ringMat); r.rotation.x = -Math.PI / 2; r.geometry.rotateZ(Math.PI / 4); r.renderOrder = 2; scene.add(r); build.ring = r; }
+  const fx_ = -Math.sin(P.yaw), fz = -Math.cos(P.yaw); const gi = tileOf(P.x + fx_ * 2.4), gj = tileOf(P.z + fz * 2.4);
+  const why = buildReason(pc, gi, gj); build.reason = why; build.ok = !why || why.startsWith('Need ');
+  const good = !why;
+  build.gi = gi; build.gj = gj; build.ghost.visible = true; build.ghost.position.set(cx(gi), 0.02, cx(gj)); build.ghost.rotation.y = build.rot ? Math.PI / 2 : 0;
+  build.ring.visible = true; build.ring.position.set(cx(gi), 0.04, cx(gj));
+  const flash = build.flashT > 0; build.flashT = Math.max(0, (build.flashT || 0) - 1 / 60);
+  const col = good ? 0x40ff60 : 0xff4030; ghostMat.color.set(col); ringMat.color.set(col); ghostMat.opacity = flash ? 0.75 : 0.42 + Math.sin(performance.now() / 180) * 0.08;
+  build.promptTxt = (good ? pc.name + ' - ' + pc.cost + ' pts - ' + (inp.device === 'touch' ? 'tap PLACE' : inp.device === 'pad' ? 'R2 to place' : 'click to place') : pc.name + ': ' + why);
+  const want = took('place') || (inp.fire && !P.semi);
+  if (inp.fire) P.semi = true;
+  if (want) { if (why) { sfx.deny(); build.flashT = 0.4; toast("Can't place: " + why); } else if (buy(pc.cost)) { placePiece(pc, gi, gj, build.rot); drawBuildbar(); } }
 }
 function placePiece(pc, i, j, rot) {
   const k = idx(i, j); const g = new THREE.Group(); const geo = pieceGeo(pc.kind);
   const w = new THREE.Mesh(geo.wood, BM.wood); w.castShadow = true; g.add(w); if (geo.metal) g.add(new THREE.Mesh(geo.metal, BM.metal));
   let gate = null; if (pc.kind === 'door') { gate = new THREE.Group(); gate.position.x = -0.88; const gm = new THREE.Mesh(pieceGeo('gate').wood, BM.wood); gate.add(gm); g.add(gate); }
   g.position.set(cx(i), 0, cx(j)); g.rotation.y = rot ? Math.PI / 2 : 0; scene.add(g);
-  const p = { k, i, j, x: cx(i), z: cx(j), g, gate, hp: pc.hp, kind: pc.kind, under: grid[k] }; pieces.push(p); grid[k] = pc.tile; owner[k] = pieces.length - 1; sfx.build(); G.flowDirty = true; G.mapDirty = true;
+  const p = { k, i, j, x: cx(i), z: cx(j), g, gate, hp: pc.hp, kind: pc.kind, tile: pc.tile, under: grid[k] }; pieces.push(p); grid[k] = pc.tile; owner[k] = pieces.length - 1; sfx.build(); G.flowDirty = true; G.mapDirty = true;
 }
-function removePiece(p) { const i = pieces.indexOf(p); if (i < 0) return; scene.remove(p.g); grid[p.k] = p.under; owner[p.k] = -1; pieces.splice(i, 1); sfx.crash(0.4); G.flowDirty = true; G.mapDirty = true; }
+function onWindowMoved() { // tile arrays slid with the player: re-lay built pieces, redo the flow field and the map
+  for (let n = 0; n < pieces.length; n++) { const p = pieces[n]; if (inb(p.i, p.j)) { p.k = idx(p.i, p.j); if (grid[p.k] !== p.tile) { p.under = grid[p.k]; grid[p.k] = p.tile; } owner[p.k] = n; } else p.k = -1; }
+  G.flowDirty = true; G.mapDirty = true;
+}
+function removePiece(p) { const i = pieces.indexOf(p); if (i < 0) return; scene.remove(p.g); if (p.k >= 0 && inb(p.i, p.j)) { const k = idx(p.i, p.j); grid[k] = p.under; owner[k] = -1; } pieces.splice(i, 1); sfx.crash(0.4); G.flowDirty = true; G.mapDirty = true; }
 
 // ---------------- car ----------------
-function enterCar() { P.driving = true; sfx.carDoor(); document.body.classList.add('driving'); $('carhud').classList.remove('hidden'); build.on = false; document.body.classList.remove('building'); $('buildbar').classList.add('hidden'); if (build.ghost) build.ghost.visible = false; setEngine(true, 0); }
+function enterCar() { resetDriveTouch(); P.driving = true; sfx.carDoor(); document.body.classList.add('driving'); $('carhud').classList.remove('hidden'); build.on = false; document.body.classList.remove('building'); $('buildbar').classList.add('hidden'); if (build.ghost) build.ghost.visible = false; setEngine(true, 0); }
 function exitCar() {
+  resetDriveTouch(); if (readOpen) closeRead();
   P.driving = false; sfx.carDoor(); document.body.classList.remove('driving'); $('carhud').classList.add('hidden'); setEngine(false); WD.carLight.intensity = 0;
-  for (const s of [1, -1]) { const x = car.x + Math.cos(car.h) * 1.8 * s, z = car.z - Math.sin(car.h) * 1.8 * s; const t = grid[idx(clamp(tileOf(x), 0, GW - 1), clamp(tileOf(z), 0, GH - 1))]; if (!solidPlayer(t)) { P.x = x; P.z = z; break; } }
-  P.yaw = car.h; car.v = 0;
+  for (const s of [1, -1]) { const x = car.x + Math.cos(car.h) * 1.8 * s, z = car.z - Math.sin(car.h) * 1.8 * s; const t = at(tileOf(x), tileOf(z)); if (!solidPlayer(t)) { P.x = x; P.z = z; break; } }
+  P.yaw = car.h; car.v = car.vx = car.vz = car.yr = 0; setSqueal(0);
 }
+// Fog cull: past ~80 m at ground level the fog hides everything (about 97% fog colour), so meshes whose nearest edge is that far
+// away are moved to a hidden layer. This cuts draw calls a lot without changing what you can see. From the air the fog thins
+// and nothing is culled.
+const _v = new THREE.Vector3(); let fogN = 0; const FOGL = 1;
+camera.layers.enable(0);
+function fogCull() {
+  if (++fogN % 10) return; const air = P.y > 8; const lim = 80, cx_ = camera.position.x, cz_ = camera.position.z;
+  scene.traverse(o => {
+    if (!(o.isMesh || o.isInstancedMesh) || o.frustumCulled === false) return;
+    const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere(); const bs = g.boundingSphere; if (!bs || bs.radius > 160 || o.isInstancedMesh) return;
+    _v.copy(bs.center).applyMatrix4(o.matrixWorld); const r = bs.radius * o.matrixWorld.getMaxScaleOnAxis();
+    const far = !air && Math.hypot(_v.x - cx_, _v.z - cz_) - r > lim;
+    if (far) { if (o.layers.mask !== 2) o.layers.set(FOGL); } else if (o.layers.mask === 2) o.layers.set(0);
+  });
+}
+function carCtl() {
+  const t = inp.device === 'touch';
+  return { gas: t ? (inp.tGas || 0) : inp.gas, brake: t ? (inp.tBrake || 0) : inp.brake, hb: !!inp.hb, steer: t ? (inp.steer || 0) : inp.mx };
+}
+function flipCar() { if (unstick(car)) { toast('Car back on its wheels'); sfx.carDoor(); } else toast('No clear spot nearby'); }
 function updCar(dt) {
   const cg = WD.car.group;
   if (P.driving) {
-    const thr = inp.gas - inp.brake; car.steer = lerp(car.steer, -inp.mx, Math.min(1, dt * 6));
-    car.v += thr * (thr * car.v < 0 ? 22 : 11) * dt; car.v *= Math.pow(0.55, dt); car.v = clamp(car.v, -7, 24);
-    car.h += car.steer * car.v * 0.11 * dt;
-    const nx = car.x - Math.sin(car.h) * car.v * dt, nz = car.z - Math.cos(car.h) * car.v * dt;
-    const p = { x: nx, z: nz }; const hit = collide(p, 1.15, solidCar) | collide({ x: nx - Math.sin(car.h) * 1.3, z: nz - Math.cos(car.h) * 1.3 }, 1.0, solidCar) | collide({ x: nx + Math.sin(car.h) * 1.3, z: nz + Math.cos(car.h) * 1.3 }, 1.0, solidCar);
-    if (hit) { if (Math.abs(car.v) > 6) { sfx.crash(Math.min(1, Math.abs(car.v) / 20)); rumble(1, 0.6, 200); } car.v *= -0.25; } else { car.x = p.x; car.z = p.z; }
-    for (const z of zombies) { if (z.dead || z.state === 'rise') continue; if (Math.hypot(z.x - car.x, z.z - car.z) < 1.9) { if (Math.abs(car.v) > 5) { sfx.splat(); damageZombie(z, 400 + Math.abs(car.v) * 120 + G.round * 40, false, 'car'); car.v *= 0.9; } else { const dx = z.x - car.x, dz = z.z - car.z, d = Math.hypot(dx, dz) || 1; z.x = car.x + dx / d * 1.9; z.z = car.z + dz / d * 1.9; } } }
-    P.x = car.x; P.z = car.z; setEngine(true, Math.abs(car.v) / 24);
-    $('carhud').innerHTML = Math.round(Math.abs(car.v) * 2.237) + ' <small>MPH</small>';
+    if (took('flip') || (inp.device === 'kbm' && took('reload')) || (inp.device === 'pad' && took('swap'))) flipCar();
+    const ctl = carCtl(); let left = dt;
+    while (left > 1e-4) { const h = Math.min(left, 1 / 60); left -= h; stepCar(car, ctl, h, v => { if (v > 4) { sfx.crash(Math.min(1, v / 20)); rumble(1, 0.6, 200); } }); }
+    const spd = Math.hypot(car.vx, car.vz);
+    for (const z of zombies) { if (z.dead || z.state === 'rise') continue; if (Math.hypot(z.x - car.x, z.z - car.z) < 1.9) { if (spd > 5) { sfx.splat(); damageZombie(z, 400 + spd * 120 + G.round * 40, false, 'car'); car.vx *= 0.9; car.vz *= 0.9; } else { const dx = z.x - car.x, dz = z.z - car.z, d = Math.hypot(dx, dz) || 1; z.x = car.x + dx / d * 1.9; z.z = car.z + dz / d * 1.9; } } }
+    P.x = car.x; P.z = car.z;
+    const rev = car.launch > 0 && car.launch < 0.75 || (ctl.gas > 0.5 && ctl.brake > 0.5) ? 0.85 : Math.min(1, spd / 31 + ctl.gas * 0.12);
+    setEngine(true, rev); setSqueal(car.squeal);
+    $('carhud').innerHTML = Math.round(spd * 2.237) + ' <small>MPH</small>' + (car.stuckT > 1.5 ? '<div class="stuck">Stuck? ' + (inp.device === 'touch' ? 'Tap FLIP' : inp.device === 'pad' ? 'Press TRIANGLE' : 'Press R') + '</div>' : '');
     WD.carLight.intensity = 60; WD.carLight.position.set(car.x - Math.sin(car.h) * 2.4, 0.8, car.z - Math.cos(car.h) * 2.4); WD.carLight.target.position.set(car.x - Math.sin(car.h) * 14, 0, car.z - Math.cos(car.h) * 14);
-  }
+  } else idleCarFx(dt);
   cg.position.set(car.x, 0, car.z); cg.rotation.y = car.h;
-  for (const w of WD.car.wheels) { w.spin.rotation.z -= car.v * dt / 0.34; if (w.front) w.w.rotation.y = car.steer * 0.5; }
+  cg.rotation.z = P.driving ? clamp(-(car.yr || 0) * car.v * 0.0035, -0.05, 0.05) : 0; // body roll in corners
+  for (const w of WD.car.wheels) { w.spin.rotation.z -= (car.launch > 0 && car.launch < 0.75 ? 25 : car.v) * dt / 0.34; if (w.front) w.w.rotation.y = car.steer * 0.9; }
 }
 
 // ---------------- update ----------------
@@ -549,9 +637,9 @@ function update(dt) {
       const fwd = inp.my / dl, side = inp.mx / dl;
       P.x += (fx_ * cp * fwd + rx * side) * fs * dt; P.z += (fz * cp * fwd + rz * side) * fs * dt;
       P.y += (Math.sin(P.pitch) * fwd * fs + ((inp.up || 0) - (inp.down || 0)) * 10) * dt;
-      P.x = clamp(P.x, 1, GW * S - 1); P.z = clamp(P.z, 1, GH * S - 1); P.y = clamp(P.y, 0, 90); P.vy = 0; P.speed = 0; P.sprinting = false;
+      P.y = clamp(P.y, 0, 90); P.vy = 0; P.speed = 0; P.sprinting = false;
     } else {
-    const p = { x: P.x + vx * dt, z: P.z + vz * dt }; collide(p, 0.35, (t, k) => solidPlayer(t, k) || t === BWALL); P.x = p.x; P.z = p.z; P.speed = Math.hypot(vx, vz); P.sprinting = sprint && P.speed > 1;
+    const p = { x: P.x + vx * dt, z: P.z + vz * dt }; collide(p, 0.35, (t, k) => solidPlayer(t, k) || t === BWALL); pushOut(p, 0.35); P.x = p.x; P.z = p.z; P.speed = Math.hypot(vx, vz); P.sprinting = sprint && P.speed > 1;
     if (took('jump') && P.y <= 0) P.vy = 4.6; P.vy -= 14 * dt; P.y = Math.max(0, P.y + P.vy * dt); if (P.y === 0) P.vy = Math.max(0, P.vy);
     if (P.y > 0 && P.vy === 0 && !G.fly) P.vy = -0.01; // dropping out of flight: fall back down
     }
@@ -582,6 +670,7 @@ function update(dt) {
   if (P.hp < P.maxHp * 0.35) { P.heartT -= dt; if (P.heartT <= 0) { sfx.heartbeat(); P.heartT = 0.9; } }
   // flow field
   G.flowT -= dt; const pk = idx(clamp(tileOf(P.x), 0, GW - 1), clamp(tileOf(P.z), 0, GH - 1));
+  if (recenter(P.x, P.z)) onWindowMoved();
   if (G.flowDirty || (pk !== G.lastFlowK && G.flowT <= 0)) { flow([[tileOf(P.x), tileOf(P.z)]]); G.lastFlowK = pk; G.flowT = 0.25; G.flowDirty = false; for (const z of zombies) { z.best = 1e9; } }
   for (let i = zombies.length - 1; i >= 0; i--) { const z = zombies[i]; if (z) updZombie(z, dt, P.x, P.z); }
   separate();
@@ -634,6 +723,8 @@ function render(dt) {
   { // the higher you fly, the thinner the fog and the brighter the moon, so the whole map is visible from the air
     const air = clamp((P.y - 4) / 30, 0, 1); scene.fog.density = 0.024 * (1 - air * 0.82); WD.hemi.intensity = 1.3 + air * 1.6; renderer.toneMappingExposure = 1.4 + air * 0.6; }
   WD.moonL.position.set(P.x - 30, 60, P.z - 40); WD.moonL.target.position.set(P.x, 0, P.z);
+  updateStream(camera.position.x, camera.position.z, P.y > 20, dt > 0.03 ? 3 : 6); WD.followGround(camera.position.x, camera.position.z); WD.followSky(camera.position.x, camera.position.z);
+  fogCull();
   renderer.clear(); renderer.render(scene, camera);
   if (vm.visible) { renderer.clearDepth(); renderer.render(vmScene, vmCam); }
   if (G.t % 0.1 < dt) drawMinimap();
@@ -646,7 +737,7 @@ function loop(now) {
   else if (G.state === 'over') { G.t += dt; updFx(dt); for (const z of zombies) updZombie(z, dt, P.x, P.z); }
   if (G.state === 'play' || G.state === 'over' || G.state === 'pause') render(G.state === 'pause' ? 0 : dt);
   else { // title: slow orbit
-    G.t += dt; camera.position.set(44 + Math.sin(G.t * 0.08) * 30, 9, 40 + Math.cos(G.t * 0.08) * 30); camera.lookAt(44, 1, 46); if (camera.fov !== 60) { camera.fov = 60; camera.updateProjectionMatrix(); } renderer.clear(); renderer.render(scene, camera);
+    G.t += dt; camera.position.set(44 + Math.sin(G.t * 0.08) * 30, 9, 40 + Math.cos(G.t * 0.08) * 30); camera.lookAt(44, 1, 46); updateStream(44, 46, false, 4); if (camera.fov !== 60) { camera.fov = 60; camera.updateProjectionMatrix(); } renderer.clear(); renderer.render(scene, camera);
   }
   endFrame();
 }
@@ -728,4 +819,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { renderer, scene, camera, fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie };
+window.__ds = { updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

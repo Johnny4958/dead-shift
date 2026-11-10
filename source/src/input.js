@@ -40,7 +40,7 @@ export function pollKeyboard() {
   inp.my = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
   inp.up = keys.has('Space') ? 1 : 0; inp.down = keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyZ') ? 1 : 0;
   inp.sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
-  inp.gas = inp.my > 0 ? 1 : 0; inp.brake = inp.my < 0 ? 1 : 0;
+  inp.gas = inp.my > 0 ? 1 : 0; inp.brake = inp.my < 0 ? 1 : 0; inp.hb = keys.has('Space');
 }
 
 // ---- gamepad ----
@@ -63,7 +63,7 @@ export function pollGamepad(dt) {
   const curve = v => Math.sign(v) * Math.pow(Math.abs(v), 1.8);
   const ads = b(6) ? 0.55 : 1;
   inp.lx += curve(rx) * 3.4 * dt * inp.sens * ads; inp.ly += curve(ry) * 2.4 * dt * inp.sens * ads * (inp.invertY ? -1 : 1);
-  inp.fire = b(7); inp.aim = b(6); inp.gas = bv(7); inp.brake = bv(6);
+  inp.fire = b(7); inp.aim = b(6); inp.gas = bv(7); inp.brake = bv(6); inp.hb = b(0);
   if (b(10) && !prevBtn[10]) inp.sprintToggle = !inp.sprintToggle;
   if (Math.hypot(ax, ay) < 0.3) inp.sprintToggle = false;
   inp.sprint = !!inp.sprintToggle;
@@ -82,7 +82,11 @@ export function rumble(strong, weak, ms) {
 function setupTouch(ui) {
   const root = document.getElementById('touch');
   const stick = document.getElementById('stick'), knob = document.getElementById('knob');
-  let moveId = null, mox = 0, moy = 0; const lookIds = new Map();
+  const wheel = document.getElementById('steer'), wknob = document.getElementById('steerKnob');
+  let moveId = null, mox = 0, moy = 0, steerId = null, sx0 = 0; const lookIds = new Map();
+  const driving = () => document.body.classList.contains('driving');
+  const SR = () => Math.min(90, innerWidth * 0.16);
+  const setSteer = dx => { const r = SR(); dx = Math.max(-r, Math.min(r, dx)); inp.steer = dx / r; wknob.style.transform = `translate(calc(-50% + ${dx}px), -50%)`; };
   const R = () => Math.min(70, innerHeight * 0.12);
   const start = e => {
     if (inp.device !== 'touch') setDevice('touch');
@@ -90,7 +94,9 @@ function setupTouch(ui) {
     for (const t of e.changedTouches) {
       const el = document.elementFromPoint(t.clientX, t.clientY);
       const btn = el && el.closest && el.closest('[data-b]');
-      if (btn) { const a = btn.dataset.b; btn.classList.add('on'); lookIds.set(t.identifier, { x: t.clientX, y: t.clientY, btn: a, el: btn }); if (a === 'fire') inp.fire = true; else if (a === 'aim') { inp.aim = !inp.aim; btn.classList.toggle('lock', inp.aim); } else if (a === 'use') { inp.use = true; press('use'); } else if (a === 'sprint') { inp.sprintToggle = !inp.sprintToggle; btn.classList.toggle('lock', inp.sprintToggle); } else press(a); e.preventDefault(); continue; }
+      if (btn) { const a = btn.dataset.b; btn.classList.add('on'); lookIds.set(t.identifier, { x: t.clientX, y: t.clientY, btn: a, el: btn }); if (a === 'fire') inp.fire = true; else if (a === 'aim') { inp.aim = !inp.aim; btn.classList.toggle('lock', inp.aim); } else if (a === 'use') { inp.use = true; press('use'); } else if (a === 'gas') inp.tGas = 1; else if (a === 'brake') inp.tBrake = 1; else if (a === 'hb') inp.hb = true; else if (a === 'sprint') { inp.sprintToggle = !inp.sprintToggle; btn.classList.toggle('lock', inp.sprintToggle); } else press(a); e.preventDefault(); continue; }
+      if (document.body.classList.contains('building')) { const bi = document.elementsFromPoint(t.clientX, t.clientY).find(el => el.dataset && el.dataset.bi != null); if (bi) { inp.buildSel = +bi.dataset.bi; e.preventDefault(); continue; } }
+      if (driving()) { if (t.clientX > innerWidth * 0.4 && steerId === null) { steerId = t.identifier; sx0 = t.clientX; wheel.style.left = t.clientX + 'px'; wheel.style.top = t.clientY + 'px'; wheel.classList.add('on'); setSteer(0); } e.preventDefault(); continue; }
       if (t.clientX < innerWidth * 0.42 && moveId === null) { moveId = t.identifier; mox = t.clientX; moy = t.clientY; stick.style.left = mox + 'px'; stick.style.top = moy + 'px'; stick.classList.add('on'); knob.style.transform = 'translate(-50%,-50%)'; }
       else lookIds.set(t.identifier, { x: t.clientX, y: t.clientY, btn: null });
       e.preventDefault();
@@ -98,6 +104,7 @@ function setupTouch(ui) {
   };
   const move = e => {
     for (const t of e.changedTouches) {
+      if (t.identifier === steerId) { setSteer(t.clientX - sx0); continue; }
       if (t.identifier === moveId) { let dx = t.clientX - mox, dy = t.clientY - moy; const l = Math.hypot(dx, dy), r = R(); if (l > r) { dx *= r / l; dy *= r / l; } inp.mx = dx / r; inp.my = -dy / r; inp.gas = Math.max(0, inp.my); inp.brake = Math.max(0, -inp.my); knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`; if (Math.hypot(inp.mx, inp.my) > 0.97 && inp.my > 0.8) inp.autoSprint = true; else if (inp.my < 0.5) inp.autoSprint = false; }
       const L = lookIds.get(t.identifier);
       if (L && (L.btn === null || L.btn === 'fire' || L.btn === 'aim')) { const k = 0.0052 * inp.sens * (inp.aim ? 0.6 : 1); inp.lx += (t.clientX - L.x) * k; inp.ly += (t.clientY - L.y) * k * 0.85 * (inp.invertY ? -1 : 1); L.x = t.clientX; L.y = t.clientY; }
@@ -107,11 +114,13 @@ function setupTouch(ui) {
   const end = e => {
     for (const t of e.changedTouches) {
       if (t.identifier === moveId) { moveId = null; inp.mx = inp.my = 0; inp.gas = inp.brake = 0; inp.autoSprint = false; stick.classList.remove('on'); }
-      const L = lookIds.get(t.identifier); if (L) { if (L.btn === 'fire') inp.fire = false; if (L.btn === 'use') inp.use = false; if (L.el) L.el.classList.remove('on'); lookIds.delete(t.identifier); }
+      if (t.identifier === steerId) { steerId = null; inp.steer = 0; wheel.classList.remove('on'); }
+      const L = lookIds.get(t.identifier); if (L) { if (L.btn === 'gas') inp.tGas = 0; if (L.btn === 'brake') inp.tBrake = 0; if (L.btn === 'hb') inp.hb = false; if (L.btn === 'fire') inp.fire = false; if (L.btn === 'use') inp.use = false; if (L.el) L.el.classList.remove('on'); lookIds.delete(t.identifier); }
     }
   };
   root.addEventListener('touchstart', start, { passive: false }); root.addEventListener('touchmove', move, { passive: false });
   root.addEventListener('touchend', end); root.addEventListener('touchcancel', end);
   addEventListener('touchstart', () => { if (inp.device !== 'touch' && !ui.playing()) setDevice('touch'); }, { passive: true });
 }
+export function resetDriveTouch() { inp.tGas = inp.tBrake = 0; inp.steer = 0; if (inp.device === 'touch') inp.hb = false; document.getElementById('steer')?.classList.remove('on'); for (const el of document.querySelectorAll('#touch .tb.on')) el.classList.remove('on'); }
 export function touchSprint() { return inp.device === 'touch' && (inp.sprintToggle || inp.autoSprint); }

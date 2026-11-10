@@ -293,24 +293,45 @@ const BM = () => once('bm', () => ({ wood: std({ map: T.plank(), vertexColors: t
 export function buildMats() { return BM(); }
 export function pieceGeo(kind) {
   return once('piece' + kind, () => {
-    const parts = [], metal = [];
+    const parts = [], metal = []; const PL = [0xd0b090, 0xb89870, 0xc8a882, 0xa88a68];
+    const nail = (x, y, z) => metal.push(bake(C(0.022, 0.022, 0.02, 6), { x, y, z, rx: Math.PI / 2, c: 0x9a9a9a }));
     if (kind === 'wall') {
-      for (const x of [-0.92, 0, 0.92]) parts.push(bake(B(0.16, 2.6, 0.16), { x, y: 1.3, c: 0x8a6a4a }));
-      for (let k = 0; k < 6; k++) parts.push(bake(B(2.05, 0.3, 0.06), { y: 0.3 + k * 0.38, z: 0.1, rz: (Math.sin(k * 7.3) * 0.04), c: [0xd0b090, 0xb89870, 0xc8a882][k % 3] }));
-      parts.push(bake(B(2.5, 0.14, 0.06), { y: 1.2, z: -0.1, rz: 0.85, c: 0x9a7a5a }));
-      metal.push(bake(B(0.8, 0.9, 0.03), { x: 0.4, y: 1.4, z: 0.15, rz: 0.06, c: 0xffffff }));
-      for (const x of [-0.92, 0, 0.92]) parts.push(bake(new THREE.ConeGeometry(0.1, 0.3, 6), { x, y: 2.75, c: 0x8a6a4a }));
+      // round log posts with chopped tops, planks with gaps and nails, a rusted sheet patch, sandbags, barbed wire
+      for (const x of [-0.94, 0, 0.94]) { parts.push(bake(C(0.1, 0.12, 2.5, 8), { x, y: 1.25, c: 0x7a5a3a })); parts.push(bake(new THREE.ConeGeometry(0.1, 0.28, 8), { x, y: 2.64, c: 0x8a6a4a })); }
+      for (let k = 0; k < 6; k++) { const y = 0.42 + k * 0.36, rz = Math.sin(k * 7.3) * 0.035, w = 2.0 + Math.sin(k * 3.1) * 0.06;
+        parts.push(bake(B(w, 0.3, 0.05), { x: Math.sin(k * 5.7) * 0.04, y, z: 0.13, rz, c: PL[k % 4] }));
+        for (const x of [-0.94, 0, 0.94]) nail(x + 0.03, y, 0.165); }
+      parts.push(bake(B(2.3, 0.13, 0.05), { y: 1.25, z: 0.18, rz: 0.88, c: 0x8a6a4a }));
+      metal.push(bake(B(0.85, 0.95, 0.025), { x: 0.42, y: 1.45, z: 0.2, rz: 0.06, c: 0xd8b8a0 }));
+      metal.push(bake(B(0.6, 0.55, 0.025), { x: -0.55, y: 0.8, z: 0.2, rz: -0.09, c: 0xb0a090 }));
+      for (let k = 0; k < 5; k++) parts.push(bake(new THREE.SphereGeometry(0.22, 7, 5), { x: -0.8 + k * 0.4, y: 0.13, z: 0.42, sx: 0.95, sy: 0.5, sz: 0.62, c: 0x8a7a58 }));
+      for (let k = 0; k < 4; k++) parts.push(bake(new THREE.SphereGeometry(0.22, 7, 5), { x: -0.6 + k * 0.4, y: 0.33, z: 0.42, sx: 0.95, sy: 0.5, sz: 0.62, c: 0x7e6e50 }));
+      for (let k = 0; k < 2; k++) metal.push(bake(new THREE.TorusGeometry(0.14, 0.012, 4, 10), { x: -0.7 + k * 0, y: 2.62, z: 0, sx: 1, c: 0x888888 }));
+      for (let k = 0; k < 13; k++) metal.push(bake(new THREE.TorusGeometry(0.1, 0.01, 4, 8), { x: -0.9 + k * 0.15, y: 2.55, ry: Math.PI / 2, c: 0x8a8a8a }));
     } else if (kind === 'door') {
-      for (const x of [-0.95, 0.95]) parts.push(bake(B(0.18, 2.7, 0.18), { x, y: 1.35, c: 0x7a5a3a }));
-      parts.push(bake(B(2.1, 0.2, 0.2), { y: 2.6, c: 0x7a5a3a }));
+      // a heavy frame: log posts, a lintel with corner braces and steel hinge plates
+      for (const x of [-0.98, 0.98]) { parts.push(bake(C(0.12, 0.14, 2.75, 8), { x, y: 1.37, c: 0x6a4a2a })); parts.push(bake(new THREE.ConeGeometry(0.12, 0.3, 8), { x, y: 2.9, c: 0x7a5a3a })); }
+      parts.push(bake(B(2.3, 0.22, 0.24), { y: 2.62, c: 0x7a5a3a }));
+      for (const sx of [-1, 1]) parts.push(bake(B(0.7, 0.12, 0.12), { x: sx * 0.7, y: 2.3, z: 0.06, rz: sx * 0.75, c: 0x8a6a4a }));
+      for (const y of [0.55, 1.85]) metal.push(bake(B(0.12, 0.2, 0.26), { x: -0.98, y, c: 0x777777 }));
+      metal.push(bake(B(0.14, 0.16, 0.26), { x: 0.98, y: 1.15, c: 0x777777 }));
+      for (const x of [-0.98, 0.98]) for (const y of [0.25, 2.45]) metal.push(bake(B(0.3, 0.06, 0.3), { x, y, c: 0x5a5a5a }));
     } else if (kind === 'gate') {
-      for (let k = 0; k < 7; k++) parts.push(bake(B(0.24, 2.2, 0.06), { x: 0.14 + k * 0.25, y: 1.15, c: [0xd0b090, 0xb89870, 0xc8a882][k % 3] }));
-      for (const y of [0.5, 1.8]) parts.push(bake(B(1.76, 0.16, 0.06), { x: 0.88, y, z: 0.06, c: 0x9a7a5a }));
-      parts.push(bake(B(2.1, 0.14, 0.06), { x: 0.88, y: 1.15, z: 0.06, rz: 0.62, c: 0x9a7a5a }));
+      // the door leaf: planks, a Z brace, steel straps with bolts and a handle
+      for (let k = 0; k < 7; k++) parts.push(bake(B(0.235, 2.25, 0.06), { x: 0.14 + k * 0.25, y: 1.15 + Math.sin(k * 4.1) * 0.03, c: PL[k % 4] }));
+      for (const y of [0.45, 1.85]) parts.push(bake(B(1.76, 0.18, 0.06), { x: 0.88, y, z: 0.06, c: 0x8a6a4a }));
+      parts.push(bake(B(1.75, 0.14, 0.06), { x: 0.88, y: 1.15, z: 0.06, rz: 0.82, c: 0x8a6a4a }));
+      for (const y of [0.45, 1.85]) { metal.push(bake(B(0.7, 0.08, 0.02), { x: 0.35, y, z: 0.1, c: 0x666666 })); for (let k = 0; k < 3; k++) nail(0.08 + k * 0.25, y, 0.115); }
+      metal.push(bake(new THREE.TorusGeometry(0.07, 0.015, 5, 10, Math.PI), { x: 1.6, y: 1.1, z: 0.12, rz: -Math.PI / 2, c: 0x555555 }));
     } else if (kind === 'spikes') {
-      parts.push(bake(B(1.9, 0.12, 0.12), { y: 0.25, c: 0x6a4a2a })); parts.push(bake(B(1.9, 0.12, 0.12), { y: 0.25, z: 0.5, c: 0x6a4a2a })); parts.push(bake(B(1.9, 0.12, 0.12), { y: 0.25, z: -0.5, c: 0x6a4a2a }));
-      for (let k = 0; k < 12; k++) { const x = -0.8 + (k % 6) * 0.32, zz = k < 6 ? 0.28 : -0.28; parts.push(bake(new THREE.ConeGeometry(0.06, 1.0, 5), { x, y: 0.55, z: zz, rx: k < 6 ? 0.55 : -0.55, c: 0xc8a070 })); }
-      metal.push(bake(B(1.9, 0.04, 0.04), { y: 0.42, c: 0xffffff }));
+      // cheval de frise: a log spine with sharpened stakes crossing through it, wrapped in wire
+      parts.push(bake(C(0.11, 0.11, 2.0, 8), { y: 0.42, rz: Math.PI / 2, c: 0x6a4a2a }));
+      for (let k = 0; k < 6; k++) { const x = -0.8 + k * 0.32, lean = 0.62;
+        for (const sd of [-1, 1]) { const ry = sd * lean; const L = 1.25;
+          parts.push(bake(C(0.045, 0.05, L, 6), { x, y: 0.42 + Math.cos(lean) * 0.08, z: 0, rx: ry, c: 0xb08860 }));
+          for (const e of [-1, 1]) { const ty = 0.42 + e * Math.cos(ry) * L / 2, tz = e * Math.sin(ry) * L / 2; if (ty < 0.1) continue; parts.push(bake(new THREE.ConeGeometry(0.05, 0.22, 6), { x, y: ty + Math.cos(ry) * 0.1 * e, z: tz + Math.sin(ry) * 0.1 * e, rx: e > 0 ? ry : ry + Math.PI, c: 0xd8b890 })); } } }
+      for (let k = 0; k < 14; k++) metal.push(bake(new THREE.TorusGeometry(0.16, 0.009, 4, 8), { x: -0.95 + k * 0.145, y: 0.45, ry: Math.PI / 2, c: 0x8a8a8a }));
+      parts.push(bake(B(2.0, 0.08, 0.5), { y: 0.04, c: 0x4a3a22 }));
     }
     return { wood: merge(parts), metal: metal.length ? merge(metal) : null };
   });

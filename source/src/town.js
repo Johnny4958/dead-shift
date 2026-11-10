@@ -3,20 +3,20 @@
 import * as THREE from 'three';
 import { T } from './tex.js';
 import { T2 } from './tex2.js';
-import { S, GW, GH, WALL_H, OUT, FENCE, PROP, GLASS, grid, idx, at, inb, surf, area, rooms, cx, trees, graves, glassTiles, hatches, bunkers, loots, intelSpots, groundGuns, special, generatorSpots, craftSpots, A_GRAVE, A_BASE, A_BUNKER, ZONES } from './map.js';
+import { S, CW, CH, WALL_H, OUT, FENCE, PROP, GLASS, grid, idx, at, inb, surf, area, rooms, cx, trees, graves, glassTiles, hatches, bunkers, loots, intelSpots, groundGuns, special, generatorSpots, craftSpots, A_GRAVE, A_BASE, A_BUNKER, ZONES, treeOff } from './map.js';
 import { B, C, bake, merge, makeGun, makeCrate } from './models.js';
 
 const std = o => new THREE.MeshStandardMaterial(o);
 let seed = 99; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 
 export function buildTown(scene, W_, M, add, q) {
-  const lotW = GW * S, lotH = GH * S;
+  const lotW = CW * S, lotH = CH * S;
   const meshOf = (parts, mat, shadow = true) => { if (!parts.length) return null; const m = new THREE.Mesh(merge(parts), mat); m.castShadow = shadow; m.receiveShadow = true; add(m); return m; };
   const vc = (o = {}) => std({ vertexColors: true, roughness: 0.85, ...o });
 
   // ---- ground surfaces: roads, the motel lot, dirt, gravel, concrete pads ----
   const sb = {}; const flat = (key, x0, z0, x1, z1, y) => { (sb[key] ||= []).push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z0, x1, y, z1, x0, y, z1); };
-  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const s = surf[idx(i, j)]; if (s) flat(s, i * S, j * S, i * S + S, j * S + S, 0.006 + s * 0.001); }
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) { const s = surf[idx(i, j)]; if (s) flat(s, i * S, j * S, i * S + S, j * S + S, 0.006 + s * 0.001); }
   const roadM = std({ map: T2.road(), roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -1 });
   const surfMat = { 1: W_.asphaltM, 2: roadM, 3: std({ map: T.dirt(), roughness: 1, color: 0x6a5a48 }), 4: std({ map: T.concrete(), roughness: 1, color: 0x7a7468 }), 5: std({ map: T.concrete(), roughness: 0.95, color: 0x8a8a84 }) };
   for (const k in sb) {
@@ -27,7 +27,7 @@ export function buildTown(scene, W_, M, add, q) {
 
   // ---- border walls (concrete flood wall), graveyard iron fence, base blast walls ----
   const wallParts = [], ironParts = [], wireParts = [];
-  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
     if (at(i, j) !== FENCE) continue; const x = cx(i), z = cx(j);
     const graveFence = (j === 77 && i >= 3 && i <= 45) || ((i === 3 || i === 45) && j >= 77 && j < 91);
     if (graveFence) {
@@ -35,7 +35,7 @@ export function buildTown(scene, W_, M, add, q) {
       const horiz = j === 77; for (let n = 0; n < 5; n++) { const o = -0.8 + n * 0.4; ironParts.push(bake(C(0.025, 0.025, 2.1, 4), { x: x + (horiz ? o : 0), y: 1.05, z: z + (horiz ? 0 : o), c: 0x161616 }), bake(C(0, 0.05, 0.16, 4), { x: x + (horiz ? o : 0), y: 2.18, z: z + (horiz ? 0 : o), c: 0x161616 })); }
       continue;
     }
-    const base = area[idx(i, Math.min(GH - 1, j))] === A_BASE || j === 91 || j === 105 && i <= 45 || (i === 3 || i === 45) && j > 91 && j <= 105;
+    const base = area[idx(i, Math.min(CH - 1, j))] === A_BASE || j === 91 || j === 105 && i <= 45 || (i === 3 || i === 45) && j > 91 && j <= 105;
     const h = base ? 3.6 : 5;
     wallParts.push(bake(B(2.02, h, 2.02), { x, y: h / 2, z, c: base ? 0x7a7a70 : 0x6a6862 }));
     if (base) wireParts.push(bake(new THREE.TorusGeometry(0.32, 0.025, 4, 10), { x, y: h + 0.3, z, ry: (i + j) % 2 ? 0 : Math.PI / 2, c: 0x8a8a8a }));
@@ -47,7 +47,7 @@ export function buildTown(scene, W_, M, add, q) {
   // ---- trees: pines in the woods, a few dead ones in the graveyard ----
   const trunkP = [], pineP = [], deadP = [];
   for (const t of trees) {
-    const x = cx(t.i) + (r() - 0.5) * 0.8, z = cx(t.j) + (r() - 0.5) * 0.8, s = t.s;
+    const o = treeOff(t.i, t.j), x = cx(t.i) + o[0], z = cx(t.j) + o[1], s = t.s; r(); r();
     if (area[idx(t.i, t.j)] === A_GRAVE || r() < 0.08) { // dead tree
       deadP.push(bake(C(0.12 * s, 0.25 * s, 5 * s, 6), { x, y: 2.5 * s, z, c: 0x2c241c }));
       for (let b = 0; b < 4; b++) deadP.push(bake(C(0.03 * s, 0.08 * s, 2.2 * s, 4), { x: x + Math.cos(b * 1.7) * 0.6 * s, y: (3 + b * 0.5) * s, z: z + Math.sin(b * 1.7) * 0.6 * s, rz: Math.cos(b * 1.7) * 0.9, rx: Math.sin(b * 1.7) * 0.9, c: 0x2c241c }));
@@ -67,7 +67,7 @@ export function buildTown(scene, W_, M, add, q) {
   const weedG = (() => { const a = new THREE.PlaneGeometry(1.2, 0.9); a.translate(0, 0.45, 0); const b = a.clone(); b.rotateY(Math.PI / 2); return merge([bake(a, { c: 0xffffff }), bake(b, { c: 0xffffff })]); })();
   const weedM = std({ map: T2.weeds(), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1, vertexColors: true });
   const spots = [];
-  for (let j = 1; j < 105; j++) for (let i = 1; i < GW - 1; i++) {
+  for (let j = 1; j < 105; j++) for (let i = 1; i < CW - 1; i++) {
     const k = idx(i, j); if (grid[k] !== OUT) continue; const s = surf[k];
     const nearWall = at(i + 1, j) >= 2 && at(i + 1, j) !== 12 || at(i - 1, j) >= 2 && at(i - 1, j) !== 12 || at(i, j + 1) >= 2 || at(i, j - 1) >= 2;
     const p = nearWall ? 0.55 : s === 0 ? 0.16 : s === 2 ? 0.07 : 0.1;
@@ -78,7 +78,7 @@ export function buildTown(scene, W_, M, add, q) {
   weeds.receiveShadow = true; add(weeds);
   // ivy climbing building walls
   const ivyM = std({ map: T2.leaves(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1, color: 0x8a9a70 }); const ivyP = [];
-  for (let j = 1; j < 105; j++) for (let i = 1; i < GW - 1; i++) {
+  for (let j = 1; j < 105; j++) for (let i = 1; i < CW - 1; i++) {
     if (grid[idx(i, j)] !== 2 || r() > 0.06) continue;
     for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (at(i + di, j + dj) === OUT) { const pg = new THREE.PlaneGeometry(1.6 + r(), 1.8 + r() * 1.4); pg.translate(0, 0.9, 0); ivyP.push(bake(pg, { x: cx(i) + di * 1.03, y: r() * 0.6, z: cx(j) + dj * 1.03, ry: di ? Math.PI / 2 : 0, c: 0xffffff })); break; }
   }

@@ -43,6 +43,9 @@ canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
 @keyframes bl{50%{opacity:.25}}
 #prompt{position:absolute;left:50%;top:62%;transform:translateX(-50%);font-weight:600;font-size:clamp(16px,2.6vh,22px);color:#fff;text-shadow:0 0 6px #000,1px 1px 0 #000;text-align:center;white-space:nowrap;background:rgba(0,0,0,.35);padding:4px 12px;border-radius:4px}
 #prompt:empty{display:none}
+#readbox{position:absolute;left:50%;top:18%;transform:translateX(-50%);max-width:min(560px,86vw);background:rgba(232,224,196,.94);color:#2a2418;font:italic 600 clamp(15px,2.4vh,20px) Georgia,serif;padding:16px 20px 10px;border-radius:4px;box-shadow:0 6px 24px rgba(0,0,0,.6);text-align:center;transform:translateX(-50%) rotate(-1deg)}
+#readbox.radio{background:rgba(20,26,20,.92);color:#9fe09a;font:600 clamp(14px,2.2vh,18px) 'Courier New',monospace;transform:translateX(-50%);border:1px solid #4a6a48}
+#readbox small{display:block;margin-top:8px;font:12px Arial;opacity:.65}
 #prompt .k{display:inline-block;min-width:24px;padding:0 6px;border:1px solid #ddd;border-radius:4px;background:rgba(255,255,255,.12);margin:0 4px}
 #center{position:absolute;left:50%;top:30%;transform:translate(-50%,-50%);text-align:center;font-weight:800;font-size:clamp(28px,6vh,52px);color:#ff3a2a;text-shadow:0 0 20px rgba(255,0,0,.6),2px 2px 0 #000;opacity:0;transition:opacity .4s;white-space:nowrap}
 #center.show{opacity:1}
@@ -71,7 +74,16 @@ canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
 #fps{position:absolute;top:calc(8px + env(safe-area-inset-top));right:calc(70px + env(safe-area-inset-right));font:12px monospace;color:#8f8}
 #buildbar{position:absolute;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:8px}
 #buildbar div{background:rgba(0,0,0,.6);border:2px solid #555;border-radius:8px;padding:6px 10px;font-weight:600;font-size:15px;text-align:center;min-width:86px}
-#buildbar div.sel{border-color:#f2d68a;color:#f2d68a}
+#buildbar div.sel{border-color:#f2d68a;color:#f2d68a;background:rgba(60,48,10,.75);transform:scale(1.06)}
+#buildbar{pointer-events:auto;z-index:6}
+#buildbar div{cursor:pointer;min-height:40px}
+#buildbar div b{font-size:11px;color:#888;margin-right:2px}
+#buildbar div.poor span{color:#e07060}
+.tb.bld{display:none}
+body.building .tb.bld{display:flex}
+body.building .tb[data-b=aim],body.building .tb[data-b=reload],body.building .tb[data-b=knife],body.building .tb[data-b=grenade],body.building .tb[data-b=jump]{display:none}
+.tb[data-b=place]{width:88px;height:88px;right:calc(132px + env(safe-area-inset-right));bottom:calc(110px + env(safe-area-inset-bottom));font-size:15px;background:rgba(30,120,40,.5);border-color:rgba(140,255,140,.75)}
+@media (orientation:portrait){#buildbar{bottom:calc(312px + env(safe-area-inset-bottom))}#buildbar div{min-width:72px;font-size:13px;padding:6px 6px}}
 #buildbar div span{display:block;font-size:12px;color:#aaa}
 #carhud{position:absolute;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);font-weight:800;font-size:34px;text-shadow:2px 2px 0 #000}
 #carhud small{font-size:16px;color:#bbb}
@@ -128,8 +140,23 @@ body[data-device=touch] #touch.live{display:block}
 .tb[data-b=build]{top:calc(10px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right))}
 .tb[data-b=rotate]{top:calc(52px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right))}
 body:not(.building) .tb[data-b=rotate]{display:none}
-body.driving .tb:not([data-b=use]):not([data-b=pause]):not([data-b=view]){display:none}
+body.driving .tb:not([data-b=use]):not([data-b=pause]):not([data-b=view]):not(.drv){display:none}
 body.driving #cross{display:none}
+.tb.drv{display:none}
+body.driving .tb.drv{display:flex}
+body.driving .tb[data-b=use]{right:auto;left:calc(20px + env(safe-area-inset-left));bottom:auto;top:calc(10px + env(safe-area-inset-top));width:70px;height:40px;border-radius:10px;font-size:12px}
+.tb[data-b=gas]{width:92px;height:92px;left:calc(128px + env(safe-area-inset-left));bottom:calc(26px + env(safe-area-inset-bottom));font-size:18px;background:rgba(30,120,40,.5);border-color:rgba(140,255,140,.7)}
+.tb[data-b=brake]{width:76px;height:76px;left:calc(26px + env(safe-area-inset-left));bottom:calc(26px + env(safe-area-inset-bottom));font-size:12px;line-height:1.1;background:rgba(150,30,20,.5);border-color:rgba(255,140,120,.7)}
+.tb[data-b=hb]{width:66px;height:66px;left:calc(60px + env(safe-area-inset-left));bottom:calc(128px + env(safe-area-inset-bottom));font-size:11px;line-height:1.1;background:rgba(140,110,30,.5);border-color:rgba(255,220,120,.7)}
+.tb[data-b=flip]{top:calc(10px + env(safe-area-inset-top));left:calc(100px + env(safe-area-inset-left))}
+#steer{position:absolute;width:200px;height:56px;margin:-28px 0 0 -100px;display:none;pointer-events:none}
+#steer.on{display:block}
+#steer .rail{position:absolute;left:0;right:0;top:24px;height:8px;border-radius:4px;background:rgba(255,255,255,.22)}
+#steerKnob{position:absolute;left:50%;top:50%;width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,.3);border:2px solid rgba(255,255,255,.6);transform:translate(-50%,-50%)}
+#steerHint{display:none;position:absolute;right:calc(30px + env(safe-area-inset-right));bottom:calc(40px + env(safe-area-inset-bottom));width:150px;text-align:center;color:rgba(255,255,255,.55);font:600 12px Arial;border:2px dashed rgba(255,255,255,.25);border-radius:12px;padding:16px 8px;pointer-events:none}
+body.driving #steerHint{display:block}
+#carhud .stuck{font-size:15px;color:#f2d68a;margin-top:2px;text-align:center}
+@media (orientation:portrait){.tb[data-b=gas]{left:calc(104px + env(safe-area-inset-left))}#steerHint{width:120px}}
 body[data-device=touch] #ammo{bottom:calc(14px + env(safe-area-inset-bottom));right:calc(240px + env(safe-area-inset-right))}
 body[data-device=touch] #points{bottom:auto;top:calc(52px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right))}
 body[data-device=touch] #fps{right:calc(210px + env(safe-area-inset-right))}
@@ -154,6 +181,7 @@ body.upright #rotateMsg{display:none!important}
   <div id="ammo"><div id="gunName"></div><div id="clip"></div><div id="nades"></div></div>
   <div id="powerups"></div>
   <div id="prompt"></div>
+  <div id="readbox" class="hidden"></div>
   <div id="center"></div>
   <div id="buildbar" class="hidden"></div>
   <div id="carhud" class="hidden"></div>
@@ -175,6 +203,13 @@ body.upright #rotateMsg{display:none!important}
   <div class="tb sq" data-b="view">VIEW</div>
   <div class="tb sq" data-b="build">BUILD</div>
   <div class="tb sq" data-b="rotate">ROTATE</div>
+  <div class="tb bld" data-b="place">PLACE</div>
+  <div class="tb drv" data-b="gas">GAS</div>
+  <div class="tb drv" data-b="brake">BRAKE<br>REV</div>
+  <div class="tb drv" data-b="hb">HAND<br>BRAKE</div>
+  <div class="tb sq drv" data-b="flip">FLIP</div>
+  <div id="steer"><div class="rail"></div><div id="steerKnob"></div></div>
+  <div id="steerHint">Drag left / right here to steer</div>
 </div>
 <div id="rotateMsg"><div class="ph"></div>Plays best with your phone sideways<button id="bUpright" style="margin-top:22px;font-size:17px;padding:12px 22px;border-radius:10px;border:2px solid #ccc;background:#222;color:#fff">Play upright anyway</button></div>
 

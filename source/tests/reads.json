@@ -1,0 +1,9 @@
+[["click","#bPlay"],["wait",1200],
+["eval","(()=>{const d=__ds; d.G.god=true; d.P.x=1660; d.P.z=60; d.recenter(830,30,true); d.updateStream(d.P.x,d.P.z,true,999,true); d.sim(0.5); const all=[]; for(const g of d.liveChunks.values()) for(const r of g.userData.reads) all.push(r); window.RD=all; return {n:all.length, radios:all.filter(r=>r.radio).length, ex:all.slice(0,3).map(r=>[Math.round(r.x),Math.round(r.z),r.text.slice(0,50)])}})()"],
+["eval","(()=>{const d=__ds; const r=RD.find(r=>!r.radio); d.P.x=r.x; d.P.z=r.z; d.sim(0.3); return {prompt:document.getElementById('prompt').innerText}})()"],
+["key","KeyF",80],["eval","(()=>{__ds.sim(0.2); const b=document.getElementById('readbox'); return {open:!b.classList.contains('hidden'), text:b.innerText.slice(0,120)}})()"],["shot","read-note"],
+["key","KeyF",80],["eval","(()=>{__ds.sim(0.2); return {closed:document.getElementById('readbox').classList.contains('hidden')}})()"],
+["eval","(()=>{const d=__ds; const r=RD.find(r=>r.radio); if(!r) return 'no radio'; d.P.x=r.x; d.P.z=r.z; d.sim(0.3); return {prompt:document.getElementById('prompt').innerText}})()"],
+["key","KeyF",80],["eval","(()=>{__ds.sim(0.2); const b=document.getElementById('readbox'); return {open:!b.classList.contains('hidden'), radio:b.classList.contains('radio'), text:b.innerText.slice(0,120)}})()"],["shot","read-radio"],
+["eval","(()=>{const d=__ds; d.P.x+=30; d.sim(0.5); return {closedWhenWalkedAway:document.getElementById('readbox').classList.contains('hidden')}})()"]
+]

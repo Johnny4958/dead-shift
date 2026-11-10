@@ -7,7 +7,7 @@ async def main():
     pg = await (await br.new_context(viewport={'width': VW, 'height': VH})).new_page(); errs = []
     pg.on('pageerror', lambda e: errs.append(str(e)+' @ '+(e.stack or '')[:300]))
     pg.on('console', lambda m: errs.append('console:' + m.text) if m.type in ('error', 'warning') else None)
-    t0 = time.time(); await pg.goto('http://localhost:8112/index.html'); await pg.wait_for_timeout(3000)
+    t0 = time.time(); await pg.goto(sys.argv[3] if len(sys.argv) > 3 else 'http://localhost:8112/index.html'); await pg.wait_for_timeout(3000)
     await pg.evaluate("document.getElementById('bPlay').click()"); await pg.wait_for_timeout(800)
     print('load+start s', round(time.time() - t0, 1))
     info = await pg.evaluate('''(()=>{const d=__ds; return {P:[d.P.x|0,d.P.z|0], keys:Object.keys(d).join(',')}})()''')

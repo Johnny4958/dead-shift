@@ -121,7 +121,8 @@ export const sfx = {
   toxic() { if (!ctx) return; const t = now(); noise(t, 0.6, 900, 1, 0.5); tone(t, 300, 60, 0.5, 0.3, 'square'); },
   heartbeat() { if (!ctx) return; const t = now(); tone(t, 60, 40, 0.12, 0.6); tone(t + 0.2, 55, 40, 0.12, 0.45); },
   carDoor() { if (!ctx) return; const t = now(); noise(t, 0.12, 600, 1, 0.5); tone(t, 140, 80, 0.1, 0.3, 'square'); },
-  crash(v) { if (!ctx) return; const t = now(); noise(t, 0.4, 500, 0.6, Math.min(1, v * 0.08)); },
+  radio() { if (!ctx) return; const t = now(); noise(t, 1.1, 1900, 2, 0.22, 'bandpass'); noise(t + 0.15, 0.5, 900, 2, 0.12, 'bandpass'); },
+  crash(v) { if (!ctx) return; const t = now(); noise(t, 0.4, 500, 0.6, Math.min(1, 0.15 + v * 0.7)); tone(t, 90, 40, 0.25, Math.min(0.6, v * 0.6)); },
 };
 export function setEngine(on, rpm = 0) {
   if (!ctx) return;
@@ -130,6 +131,13 @@ export function setEngine(on, rpm = 0) {
   const t = now();
   if (!on) { engine.g.gain.setTargetAtTime(0.0001, t, 0.1); return; }
   const base = 34 + rpm * 70; engine.o.frequency.setTargetAtTime(base, t, 0.05); engine.o2.frequency.setTargetAtTime(base * 0.5, t, 0.05); engine.f.frequency.setTargetAtTime(380 + rpm * 900, t, 0.05); engine.g.gain.setTargetAtTime(0.12 + rpm * 0.1, t, 0.05);
+}
+let squeal = null;
+export function setSqueal(level) { // tyre squeal: a narrow band of noise plus a wobbling whine
+  if (!ctx) return;
+  if (!squeal && level > 0) { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2100; f.Q.value = 6; const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 980; const lfo = ctx.createOscillator(); lfo.frequency.value = 9; const lg = ctx.createGain(); lg.gain.value = 60; lfo.connect(lg); lg.connect(o.frequency); const og = ctx.createGain(); og.gain.value = 0.25; o.connect(og); const g = ctx.createGain(); g.gain.value = 0.0001; s.connect(f); f.connect(g); og.connect(g); g.connect(master); s.start(); o.start(); lfo.start(); squeal = { g, f, o }; }
+  if (!squeal) return; const t = now();
+  squeal.g.gain.setTargetAtTime(Math.max(0.0001, level * 0.22), t, 0.06); squeal.f.frequency.setTargetAtTime(1700 + level * 900, t, 0.1); squeal.o.frequency.setTargetAtTime(860 + level * 260, t, 0.1);
 }
 function ambience() { // low wind + distant drone
   const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 260; const g = ctx.createGain(); g.gain.value = 0.05; s.connect(f); f.connect(g); g.connect(master); s.start();
