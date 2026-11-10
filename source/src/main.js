@@ -34,6 +34,8 @@ vmScene.add(new THREE.HemisphereLight(0xb0b8d0, 0x302820, 1.4)); const vmDir = n
 
 buildMap();
 const WD = buildWorld(scene, env, qual());
+// night, but readable: lift the ambient and moon so the lot is visible on phones
+WD.hemi.intensity = 1.3; WD.moonL.intensity = 1.2; scene.environment = env; scene.environmentIntensity = 0.22;
 let pixelScale = 1;
 function applyQuality() {
   const q = qual();
