@@ -16,7 +16,7 @@ Read after HANDOFF-INFINITE.md. This round finished the car, build mode, Lockwoo
   reason shown in the prompt and a toast + deny sound when a piece can't go there (standing there, zombie, car, already built, wall, points).
   Aim/reload/knife/grenade/jump hidden while building. New models for wall (log posts, planks, nails, tin patches, sandbags, wire),
   door frame + leaf (straps, Z brace, handle) and spikes (cheval-de-frise with sharpened stakes and wire).
-- **Lockwood furniture**: `furnishFixed()` in proc.js furnishes 37 original rooms (houses, shops, police, bar, school, church, cabin,
+- **Lockwood furniture**: `furnishFixed()` in proc.js furnishes 36 original rooms (houses, shops, police, bar, school, church, cabin,
   garage, diner) once at startup as one merged mesh. Keeps clear of every doorway/window/wall-buy/perk/box (checked: 0 blocked).
 - **Readables**: walking near a note/journal/radio shows "Read the note" / "Listen to the radio"; USE opens a paper or radio-style box,
   USE again or walking away closes it.
