@@ -586,12 +586,12 @@ function loop(now) {
 }
 
 // ---------------- menus ----------------
-const screens = ['title', 'pause', 'settings', 'controls', 'over', 'admin'];
+const screens = ['title', 'pause', 'settings', 'controls', 'over', 'admin', 'pin'];
 let back = 'title';
 function show(id) { for (const s of screens) $(s).classList.toggle('hidden', s !== id); }
 function play() {
   initAudio(); setVolume(SET.vol);
-  newGame(); G.state = 'play'; show(null); $('hud').classList.remove('hidden'); $('touch').classList.add('live');
+  newGame(); admOpen = false; G.state = 'play'; show(null); $('hud').classList.remove('hidden'); $('touch').classList.add('live');
   if (inp.device === 'kbm' && !isTouch) canvas.requestPointerLock?.();
 }
 function pause() { if (G.state !== 'play') return; G.state = 'pause'; inp.fire = inp.aim = false; setEngine(false); show('pause'); $('touch').classList.remove('live'); if (document.pointerLockElement) document.exitPointerLock(); }
@@ -611,7 +611,28 @@ function admSync() {
 }
 function admMsg(t) { $('admMsg').textContent = t; }
 $('admGuns').innerHTML = Object.keys(W).map(k => `<button data-k="${k}">${W[k].name}</button>`).join('');
-$('bAdmin').onclick = () => { admMsg(''); admSync(); show('admin'); };
+// PIN gate: unlocked once per game. Stored as a hash so it isn't shown anywhere in the UI.
+let admOpen = false, pinBuf = '';
+const pinHash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
+function openAdmin() { admMsg(''); admSync(); show('admin'); }
+function pinDraw() { [...$('pinDots').children].forEach((d, i) => d.classList.toggle('f', i < pinBuf.length)); }
+function pinKey(k) {
+  if (k === 'x') { show('pause'); return; }
+  if (k === 'b') { pinBuf = pinBuf.slice(0, -1); pinDraw(); return; }
+  if (pinBuf.length >= 4) return;
+  pinBuf += k; $('pinMsg').textContent = ''; pinDraw();
+  if (pinBuf.length === 4) {
+    if (pinHash(pinBuf) === 7945292) { admOpen = true; pinBuf = ''; pinDraw(); openAdmin(); }
+    else { pinBuf = ''; $('pinMsg').textContent = 'Wrong PIN'; setTimeout(pinDraw, 250); }
+  }
+}
+for (const b of $('pinPad').children) b.onclick = () => pinKey(b.dataset.k);
+addEventListener('keydown', e => {
+  if ($('pin').classList.contains('hidden')) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  if (/^\d$/.test(e.key)) pinKey(e.key); else if (e.key === 'Backspace') pinKey('b'); else if (e.key === 'Escape') pinKey('x');
+}, true);
+$('bAdmin').onclick = () => { if (admOpen) return openAdmin(); pinBuf = ''; pinDraw(); $('pinMsg').textContent = ''; show('pin'); };
 $('bAdmBack').onclick = () => show('pause');
 for (const b of $('admMoney').children) b.onclick = () => { const n = +b.dataset.n; G.points += n; updHud(); admSync(); admMsg('Added ' + n.toLocaleString() + ' points to you.'); };
 for (const b of $('admPapSeg').children) b.onclick = () => { admPap = b.dataset.v === '1'; admSync(); };

@@ -91,6 +91,10 @@ h2{font-weight:600;font-size:clamp(16px,3.2vw,24px);margin:6px 0 18px;color:#ddd
 .opt{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;font-family:BC,Arial;font-size:19px}
 .opt .row{margin:0}
 .seg button{pointer-events:auto;background:#1a1a1a;border:1px solid #555;color:#ccc;font:600 17px BC,Arial;padding:6px 12px;cursor:pointer}
+#pinDots{display:flex;gap:14px;margin:4px 0}#pinDots i{width:16px;height:16px;border-radius:50%;border:2px solid #f2d68a}#pinDots i.f{background:#f2d68a}
+#pinMsg{min-height:20px;color:#ff5a4a;font:600 16px Arial}
+#pinPad{display:grid;grid-template-columns:repeat(3,72px);gap:8px;margin-top:4px}#pinPad button{pointer-events:auto;height:56px;background:#1a1a1a;border:1px solid #555;border-radius:6px;color:#eee;font:600 26px BC,Arial;cursor:pointer;touch-action:manipulation}#pinPad button:active{background:#7a1a1a}#pinPad .pinSm{font-size:15px}
+@media (max-height:440px){#pin{padding:6px}#pinPad{gap:5px}#pinPad button{height:44px}#pinDots{margin:2px 0}}
 .seg button.on{background:#7a1a1a;color:#fff;border-color:#ff4a3a}
 input[type=range]{width:170px;accent-color:#c22}
 #best{color:#aaa;font-size:16px;margin-top:10px;letter-spacing:1px}
@@ -203,6 +207,12 @@ body.upright #rotateMsg{display:none!important}
     <div class="hint" id="qInfo" style="text-align:left;margin:4px 0 0"></div>
   </div>
   <button class="btn" id="bSetBack">BACK</button>
+</div>
+<div id="pin" class="screen hidden">
+  <h3 style="font:800 24px BC,Arial;color:#f2d68a;margin:0 0 6px;letter-spacing:1px">ENTER ADMIN PIN</h3>
+  <div id="pinDots"><i></i><i></i><i></i><i></i></div>
+  <div id="pinMsg"></div>
+  <div id="pinPad"><button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k="x" class="pinSm">CANCEL</button><button data-k="0">0</button><button data-k="b" class="pinSm">&#9003;</button></div>
 </div>
 <div id="admin" class="screen hidden">
   <div class="panel" style="max-width:640px">
