@@ -96,7 +96,7 @@ function setupTouch(ui) {
       const btn = el && el.closest && el.closest('[data-b]');
       if (btn) { const a = btn.dataset.b; btn.classList.add('on'); lookIds.set(t.identifier, { x: t.clientX, y: t.clientY, btn: a, el: btn }); if (a === 'fire') inp.fire = true; else if (a === 'aim') { inp.aim = !inp.aim; btn.classList.toggle('lock', inp.aim); } else if (a === 'use') { inp.use = true; press('use'); } else if (a === 'gas') inp.tGas = 1; else if (a === 'brake') inp.tBrake = 1; else if (a === 'hb') inp.hb = true; else if (a === 'sprint') { inp.sprintToggle = !inp.sprintToggle; btn.classList.toggle('lock', inp.sprintToggle); } else press(a); e.preventDefault(); continue; }
       if (document.body.classList.contains('building')) { const bi = document.elementsFromPoint(t.clientX, t.clientY).find(el => el.dataset && el.dataset.bi != null); if (bi) { inp.buildSel = +bi.dataset.bi; e.preventDefault(); continue; } }
-      if (driving()) { if (t.clientX > innerWidth * 0.4 && steerId === null) { steerId = t.identifier; sx0 = t.clientX; wheel.style.left = t.clientX + 'px'; wheel.style.top = t.clientY + 'px'; wheel.classList.add('on'); setSteer(0); } e.preventDefault(); continue; }
+      if (driving()) { if (t.clientX > innerWidth * 0.4 && steerId === null) { steerId = t.identifier; sx0 = t.clientX; steerUses(); wheel.style.left = t.clientX + 'px'; wheel.style.top = t.clientY + 'px'; wheel.classList.add('on'); setSteer(0); } e.preventDefault(); continue; }
       if (t.clientX < innerWidth * 0.42 && moveId === null) { moveId = t.identifier; mox = t.clientX; moy = t.clientY; stick.style.left = mox + 'px'; stick.style.top = moy + 'px'; stick.classList.add('on'); knob.style.transform = 'translate(-50%,-50%)'; }
       else lookIds.set(t.identifier, { x: t.clientX, y: t.clientY, btn: null });
       e.preventDefault();
@@ -122,5 +122,7 @@ function setupTouch(ui) {
   root.addEventListener('touchend', end); root.addEventListener('touchcancel', end);
   addEventListener('touchstart', () => { if (inp.device !== 'touch' && !ui.playing()) setDevice('touch'); }, { passive: true });
 }
+function steerUses() { let n = +(localStorage.getItem('ds_steerN') || 0) + 1; try { localStorage.setItem('ds_steerN', n); } catch (e) {} if (n >= 4) document.body.classList.add('steerKnown'); }
+try { if (+(localStorage.getItem('ds_steerN') || 0) >= 4) document.body.classList.add('steerKnown'); } catch (e) {}
 export function resetDriveTouch() { inp.tGas = inp.tBrake = 0; inp.steer = 0; if (inp.device === 'touch') inp.hb = false; document.getElementById('steer')?.classList.remove('on'); for (const el of document.querySelectorAll('#touch .tb.on')) el.classList.remove('on'); }
 export function touchSprint() { return inp.device === 'touch' && (inp.sprintToggle || inp.autoSprint); }

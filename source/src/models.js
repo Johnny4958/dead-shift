@@ -318,7 +318,7 @@ export function pieceGeo(kind) {
       for (const x of [-0.98, 0.98]) for (const y of [0.25, 2.45]) metal.push(bake(B(0.3, 0.06, 0.3), { x, y, c: 0x5a5a5a }));
     } else if (kind === 'gate') {
       // the door leaf: planks, a Z brace, steel straps with bolts and a handle
-      for (let k = 0; k < 7; k++) parts.push(bake(B(0.235, 2.25, 0.06), { x: 0.14 + k * 0.25, y: 1.15 + Math.sin(k * 4.1) * 0.03, c: PL[k % 4] }));
+      for (let k = 0; k < 7; k++) parts.push(bake(B(0.252, 2.25, 0.06), { x: 0.14 + k * 0.25, y: 1.15 + Math.sin(k * 4.1) * 0.03, c: PL[k % 4] }));
       for (const y of [0.45, 1.85]) parts.push(bake(B(1.76, 0.18, 0.06), { x: 0.88, y, z: 0.06, c: 0x8a6a4a }));
       parts.push(bake(B(1.75, 0.14, 0.06), { x: 0.88, y: 1.15, z: 0.06, rz: 0.82, c: 0x8a6a4a }));
       for (const y of [0.45, 1.85]) { metal.push(bake(B(0.7, 0.08, 0.02), { x: 0.35, y, z: 0.1, c: 0x666666 })); for (let k = 0; k < 3; k++) nail(0.08 + k * 0.25, y, 0.115); }
@@ -334,6 +334,31 @@ export function pieceGeo(kind) {
       parts.push(bake(B(2.0, 0.08, 0.5), { y: 0.04, c: 0x4a3a22 }));
     }
     return { wood: merge(parts), metal: metal.length ? merge(metal) : null };
+  });
+}
+// Snapping walls: a wall tile is a centre post plus one arm per joined side, so runs and corners meet flush at the
+// tile edges. key = 'd:v,d:v' with d 0:+x 1:-x 2:+z 3:-z and v c (joined), p (joined, owns the shared edge post), e (free end).
+const ARM_RY = [0, Math.PI, -Math.PI / 2, Math.PI / 2];
+function wallArm(v) { return once('arm' + v, () => wallArm0(v)); }
+function wallArm0(v) {
+  const parts = [], metal = []; const PL = [0xd0b090, 0xb89870, 0xc8a882, 0xa88a68];
+  const nail = (x, y, z) => metal.push(bake(C(0.022, 0.022, 0.02, 6), { x, y, z, rx: Math.PI / 2, c: 0x9a9a9a }));
+  const len = v === 'e' ? 0.98 : 1.0; // joined arms reach the tile edge exactly
+  for (let k = 0; k < 6; k++) { const y = 0.42 + k * 0.36; parts.push(bake(B(len, 0.375, 0.06), { x: len / 2, y, z: 0, c: PL[k % 4] })); for (const s of [-1, 1]) nail(0.5, y, s * 0.035); }
+  parts.push(bake(C(0.075, 0.085, 2.4, 7), { x: 0.5, y: 1.2, z: -0.07, c: 0x7a5a3a }));
+  if (v === 'p' || v === 'e') { const px = v === 'p' ? 1.0 : 0.9; parts.push(bake(C(0.11, 0.13, 2.5, 8), { x: px, y: 1.25, c: 0x7a5a3a })); parts.push(bake(new THREE.ConeGeometry(0.11, 0.28, 8), { x: px, y: 2.64, c: 0x8a6a4a })); }
+  parts.push(bake(B(1.12, 0.12, 0.05), { x: 0.5, y: 1.25, z: -0.06, rz: 1.0, c: 0x8a6a4a }));
+  metal.push(bake(B(0.6, 0.8, 0.02), { x: 0.52, y: 1.45, z: 0.045, rz: 0.05, c: 0xd8b8a0 }));
+  for (const x of [0.32, 0.72]) parts.push(bake(new THREE.SphereGeometry(0.22, 7, 5), { x, y: 0.13, z: 0.3, sx: 0.9, sy: 0.5, sz: 0.62, c: 0x8a7a58 }));
+  parts.push(bake(new THREE.SphereGeometry(0.22, 7, 5), { x: 0.52, y: 0.33, z: 0.3, sx: 0.9, sy: 0.5, sz: 0.62, c: 0x7e6e50 }));
+  for (let k = 0; k < 7; k++) metal.push(bake(new THREE.TorusGeometry(0.1, 0.01, 4, 8), { x: 0.07 + k * 0.143, y: 2.55, ry: Math.PI / 2, c: 0x8a8a8a }));
+  return { wood: merge(parts), metal: merge(metal) };
+}
+export function wallGeo(key) {
+  return once('wall:' + key, () => {
+    const wood = [bake(C(0.12, 0.14, 2.55, 8), { y: 1.27, c: 0x6e5034 }), bake(new THREE.ConeGeometry(0.12, 0.3, 8), { y: 2.7, c: 0x8a6a4a })], metal = [];
+    for (const s of key.split(',')) { const [d, v] = s.split(':'); const a = wallArm(v); const w = a.wood.clone(); w.rotateY(ARM_RY[+d]); wood.push(w); const m = a.metal.clone(); m.rotateY(ARM_RY[+d]); metal.push(m); }
+    return { wood: merge(wood), metal: merge(metal) };
   });
 }
 export { makeGun } from './guns.js';

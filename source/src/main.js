@@ -8,7 +8,7 @@ import { S, GW, GH, surf, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone
 import { genChunk, initProc, roadAt, furnishFixed } from './proc.js';
 import { initStream, updateStream, readsNear, live as liveChunks, stats as streamStats } from './stream.js';
 import { pushOut } from './props.js';
-import { makeZombie, animZombie, warmZombies, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo } from './models.js';
+import { makeZombie, animZombie, warmZombies, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo, wallGeo } from './models.js';
 import { T, setAniso } from './tex.js';
 import { T2 } from './tex2.js';
 import { W, BOX_POOL, PAP_NAMES, makeGun } from './weapons.js';
@@ -480,7 +480,7 @@ function readables(use) {
 }
 function interact(dt) {
   let txt = ''; const use = took('use'), hold = inp.use;
-  if (P.driving) { prompt(K() + ' Get out'); if (use) exitCar(); return; }
+  if (P.driving) { const since = (performance.now() - (P.carT || 0)) / 1000; P.carStillT = Math.abs(car.v) < 1 ? (P.carStillT || 0) + dt : 0; prompt(since < 2.5 || P.carStillT > 1.2 ? K() + ' Get out' : ''); if (use) exitCar(); return; }
   if (readOpen) { const r = readOpen.r; if (Math.hypot(r.x - P.x, r.z - P.z) > (r.r || 3) + 2 || performance.now() - readOpen.t > 12000) closeRead(); else if (use) { closeRead(); prompt(''); return; } }
   // window repair
   let repairing = false;
@@ -522,6 +522,41 @@ document.getElementById('buildbar')?.addEventListener('click', e => { const el =
 const ghostMat = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.42, depthWrite: false });
 const ringMat = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
 function makeGhost(kind) { const g = new THREE.Group(); const geo = pieceGeo(kind); g.add(new THREE.Mesh(geo.wood, ghostMat)); if (geo.metal) g.add(new THREE.Mesh(geo.metal, ghostMat)); if (kind === 'door') { const gm = new THREE.Mesh(pieceGeo('gate').wood, ghostMat); gm.position.x = -0.88; g.add(gm); } g.traverse(o => { o.renderOrder = 2; }); return g; }
+// ---- snapping: pieces sit on the 2 m grid; walls grow an arm toward every joined neighbour so runs and corners meet flush
+const ADJ = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const viewAxis = () => Math.abs(Math.sin(P.yaw)) > Math.abs(Math.cos(P.yaw)) ? 1 : 0; // a lone piece faces you
+function joins(i, j) {
+  const pc = [], st = [];
+  for (let d = 0; d < 4; d++) { const t = at(i + ADJ[d][0], j + ADJ[d][1]); if (t === BWALL || t === BDOOR) pc.push(d); else if (t === WALL || t === GLASS || t === WIN || t === FENCE) st.push(d); }
+  if (pc.length < 2) for (const d of st) if (!pc.includes(d)) pc.push(d); // butt a short run up against a building wall
+  return pc;
+}
+function wallKey(i, j, defAxis) {
+  const J = joins(i, j), m = new Map();
+  for (const d of J) m.set(d, d === 0 || d === 2 ? 'p' : 'c');
+  if (J.length === 0) for (const d of (defAxis ? [2, 3] : [0, 1])) m.set(d, 'e');
+  else if (J.length === 1) m.set(J[0] ^ 1, 'e');
+  return [...m].sort((a, b) => a[0] - b[0]).map(([d, v]) => d + ':' + v).join(',');
+}
+function pieceAxis(kind, i, j, defAxis) {
+  let J; if (kind === 'spikes') { J = []; for (let d = 0; d < 4; d++) if (at(i + ADJ[d][0], j + ADJ[d][1]) === SPIKE) J.push(d); } else J = joins(i, j);
+  const x = J.some(d => d < 2), z = J.some(d => d >= 2); return x && !z ? 0 : z && !x ? 1 : defAxis;
+}
+function shapeOf(kind, i, j, defAxis) { return kind === 'wall' ? { key: 'w' + wallKey(i, j, defAxis), geo: wallGeo(wallKey(i, j, defAxis)), ry: 0 } : { key: kind + pieceAxis(kind, i, j, defAxis), geo: null, ry: pieceAxis(kind, i, j, defAxis) ? Math.PI / 2 : 0 }; }
+function refreshPieceAt(i, j) {
+  const p = pieces.find(q => q.i === i && q.j === j); if (!p) return;
+  const sh = shapeOf(p.kind, i, j, p.defAxis); if (sh.key === p.shape) return; p.shape = sh.key;
+  if (sh.geo) { p.g.children[0].geometry = sh.geo.wood; p.g.children[1].geometry = sh.geo.metal; } else p.g.rotation.y = sh.ry;
+}
+function refreshAround(i, j) { for (const [di, dj] of ADJ) refreshPieceAt(i + di, j + dj); }
+function setGhostShape(pc, gi, gj, defAxis) {
+  const sh = shapeOf(pc.kind, gi, gj, defAxis);
+  if (build.ghost && build.ghostKey === sh.key) return;
+  if (build.ghost) scene.remove(build.ghost);
+  if (sh.geo) { const g = new THREE.Group(); g.add(new THREE.Mesh(sh.geo.wood, ghostMat)); g.add(new THREE.Mesh(sh.geo.metal, ghostMat)); g.traverse(o => { o.renderOrder = 2; }); build.ghost = g; }
+  else { build.ghost = makeGhost(pc.kind); build.ghost.rotation.y = sh.ry; }
+  build.ghostKey = sh.key; scene.add(build.ghost);
+}
 function buildReason(pc, gi, gj) {
   if (!inb(gi, gj)) return 'Too far out';
   const t = grid[idx(gi, gj)];
@@ -541,35 +576,37 @@ function updBuild() {
   if (took('rotate')) { build.rot ^= 1; }
   if ((build.barPts === 0) !== (G.points < PIECES[0].cost) || G.points !== build.lastPts) { build.lastPts = G.points; drawBuildbar(); }
   const pc = PIECES[build.sel];
-  if (!build.ghost) { build.ghost = makeGhost(pc.kind); scene.add(build.ghost); }
   if (!build.ring) { const r = new THREE.Mesh(new THREE.RingGeometry(1.25, 1.42, 4, 1), ringMat); r.rotation.x = -Math.PI / 2; r.geometry.rotateZ(Math.PI / 4); r.renderOrder = 2; scene.add(r); build.ring = r; }
   const fx_ = -Math.sin(P.yaw), fz = -Math.cos(P.yaw); const gi = tileOf(P.x + fx_ * 2.4), gj = tileOf(P.z + fz * 2.4);
   const why = buildReason(pc, gi, gj); build.reason = why; build.ok = !why || why.startsWith('Need ');
   const good = !why;
-  build.gi = gi; build.gj = gj; build.ghost.visible = true; build.ghost.position.set(cx(gi), 0.02, cx(gj)); build.ghost.rotation.y = build.rot ? Math.PI / 2 : 0;
+  const defAxis = viewAxis() ^ build.rot; setGhostShape(pc, gi, gj, defAxis);
+  build.gi = gi; build.gj = gj; build.ghost.visible = true; build.ghost.position.set(cx(gi), 0.02, cx(gj));
   build.ring.visible = true; build.ring.position.set(cx(gi), 0.04, cx(gj));
   const flash = build.flashT > 0; build.flashT = Math.max(0, (build.flashT || 0) - 1 / 60);
   const col = good ? 0x40ff60 : 0xff4030; ghostMat.color.set(col); ringMat.color.set(col); ghostMat.opacity = flash ? 0.75 : 0.42 + Math.sin(performance.now() / 180) * 0.08;
   build.promptTxt = (good ? pc.name + ' - ' + pc.cost + ' pts - ' + (inp.device === 'touch' ? 'tap PLACE' : inp.device === 'pad' ? 'R2 to place' : 'click to place') : pc.name + ': ' + why);
   const want = took('place') || (inp.fire && !P.semi);
   if (inp.fire) P.semi = true;
-  if (want) { if (why) { sfx.deny(); build.flashT = 0.4; toast("Can't place: " + why); } else if (buy(pc.cost)) { placePiece(pc, gi, gj, build.rot); drawBuildbar(); } }
+  if (want) { if (why) { sfx.deny(); build.flashT = 0.4; toast("Can't place: " + why); } else if (buy(pc.cost)) { placePiece(pc, gi, gj, defAxis); drawBuildbar(); build.ghostKey = null; } }
 }
-function placePiece(pc, i, j, rot) {
-  const k = idx(i, j); const g = new THREE.Group(); const geo = pieceGeo(pc.kind);
+function placePiece(pc, i, j, defAxis) {
+  const k = idx(i, j); const g = new THREE.Group(); const geo = pc.kind === 'wall' ? wallGeo(wallKey(i, j, defAxis)) : pieceGeo(pc.kind);
   const w = new THREE.Mesh(geo.wood, BM.wood); w.castShadow = true; g.add(w); if (geo.metal) g.add(new THREE.Mesh(geo.metal, BM.metal));
   let gate = null; if (pc.kind === 'door') { gate = new THREE.Group(); gate.position.x = -0.88; const gm = new THREE.Mesh(pieceGeo('gate').wood, BM.wood); gate.add(gm); g.add(gate); }
-  g.position.set(cx(i), 0, cx(j)); g.rotation.y = rot ? Math.PI / 2 : 0; scene.add(g);
-  const p = { k, i, j, x: cx(i), z: cx(j), g, gate, hp: pc.hp, kind: pc.kind, tile: pc.tile, under: grid[k] }; pieces.push(p); grid[k] = pc.tile; owner[k] = pieces.length - 1; sfx.build(); G.flowDirty = true; G.mapDirty = true;
+  const sh = shapeOf(pc.kind, i, j, defAxis);
+  g.position.set(cx(i), 0, cx(j)); g.rotation.y = sh.ry; scene.add(g);
+  const p = { k, i, j, x: cx(i), z: cx(j), g, gate, hp: pc.hp, kind: pc.kind, tile: pc.tile, under: grid[k], defAxis, shape: sh.key }; pieces.push(p); grid[k] = pc.tile; owner[k] = pieces.length - 1; sfx.build(); G.flowDirty = true; G.mapDirty = true;
+  refreshAround(i, j); return p;
 }
 function onWindowMoved() { // tile arrays slid with the player: re-lay built pieces, redo the flow field and the map
   for (let n = 0; n < pieces.length; n++) { const p = pieces[n]; if (inb(p.i, p.j)) { p.k = idx(p.i, p.j); if (grid[p.k] !== p.tile) { p.under = grid[p.k]; grid[p.k] = p.tile; } owner[p.k] = n; } else p.k = -1; }
   G.flowDirty = true; G.mapDirty = true;
 }
-function removePiece(p) { const i = pieces.indexOf(p); if (i < 0) return; scene.remove(p.g); if (p.k >= 0 && inb(p.i, p.j)) { const k = idx(p.i, p.j); grid[k] = p.under; owner[k] = -1; } pieces.splice(i, 1); sfx.crash(0.4); G.flowDirty = true; G.mapDirty = true; }
+function removePiece(p) { const i = pieces.indexOf(p); if (i < 0) return; scene.remove(p.g); if (p.k >= 0 && inb(p.i, p.j)) { const k = idx(p.i, p.j); grid[k] = p.under; owner[k] = -1; } pieces.splice(i, 1); refreshAround(p.i, p.j); sfx.crash(0.4); G.flowDirty = true; G.mapDirty = true; }
 
 // ---------------- car ----------------
-function enterCar() { resetDriveTouch(); P.driving = true; sfx.carDoor(); document.body.classList.add('driving'); $('carhud').classList.remove('hidden'); build.on = false; document.body.classList.remove('building'); $('buildbar').classList.add('hidden'); if (build.ghost) build.ghost.visible = false; setEngine(true, 0); }
+function enterCar() { resetDriveTouch(); P.driving = true; P.carT = performance.now(); P.carStillT = 0; sfx.carDoor(); document.body.classList.add('driving'); $('carhud').classList.remove('hidden'); build.on = false; document.body.classList.remove('building'); $('buildbar').classList.add('hidden'); if (build.ghost) build.ghost.visible = false; setEngine(true, 0); }
 function exitCar() {
   resetDriveTouch(); if (readOpen) closeRead();
   P.driving = false; sfx.carDoor(); document.body.classList.remove('driving'); $('carhud').classList.add('hidden'); setEngine(false); WD.carLight.intensity = 0;
@@ -819,4 +856,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

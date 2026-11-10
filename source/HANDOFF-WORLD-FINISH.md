@@ -39,3 +39,13 @@ Read after HANDOFF-INFINITE.md. This round finished the car, build mode, Lockwoo
 - Real-phone frame rate unknown. If it lags: lower stream radius on touch (stream.js), or lower the fog-cull distance.
 - Still not built: zombies hunting by noise/blood/sight, more cars + upgrades, generators/crafting, traders, day/night, drone,
   helicopter, story intro, 4-player.
+
+## Checkpoint: build snapping + driving HUD (Nov 10 evening)
+- Build pieces snap to the 2 m grid. Walls use `wallGeo(key)` (models.js): centre post + one arm per joined side; arms reach the tile edge, so
+  runs and L/T/X corners meet flush. Keys are recomputed for neighbours on place/destroy (`refreshAround`). A lone piece faces across your view;
+  ROTATE flips that. Doors/spikes take the axis of the run they join. The ghost preview shows the snapped shape (`setGhostShape`).
+- Driving: "USE Get out" shows 2.5 s after entering, or after the car has been stopped 1.2 s. USE/FLIP moved off the minimap (right of it in
+  landscape, below the zombie count in portrait). Steer hint fades after 4 steers (localStorage ds_steerN). Gun name/ammo hidden while driving.
+- Tests: tests/square.json (closed 5x5 ring + door, 1440 rays per height, 0 gaps), tests/buildsnap.json (real touch taps build an L + door +
+  spikes), tests/carhud.json (prompt timing, overlap check of USE/FLIP against every visible HUD element).
+- Next per plan: Mustang + first-person gun models (check the Patrol .45 shows its detailed model), then smart zombies, day/night, vehicles, base.

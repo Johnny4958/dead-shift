@@ -144,11 +144,15 @@ body.driving .tb:not([data-b=use]):not([data-b=pause]):not([data-b=view]):not(.d
 body.driving #cross{display:none}
 .tb.drv{display:none}
 body.driving .tb.drv{display:flex}
-body.driving .tb[data-b=use]{right:auto;left:calc(20px + env(safe-area-inset-left));bottom:auto;top:calc(10px + env(safe-area-inset-top));width:70px;height:40px;border-radius:10px;font-size:12px}
+body.driving .tb[data-b=use]{right:auto;left:calc(14px + env(safe-area-inset-left));bottom:auto;top:calc(158px + env(safe-area-inset-top));width:70px;height:40px;border-radius:10px;font-size:12px}
 .tb[data-b=gas]{width:92px;height:92px;left:calc(128px + env(safe-area-inset-left));bottom:calc(26px + env(safe-area-inset-bottom));font-size:18px;background:rgba(30,120,40,.5);border-color:rgba(140,255,140,.7)}
 .tb[data-b=brake]{width:76px;height:76px;left:calc(26px + env(safe-area-inset-left));bottom:calc(26px + env(safe-area-inset-bottom));font-size:12px;line-height:1.1;background:rgba(150,30,20,.5);border-color:rgba(255,140,120,.7)}
 .tb[data-b=hb]{width:66px;height:66px;left:calc(60px + env(safe-area-inset-left));bottom:calc(128px + env(safe-area-inset-bottom));font-size:11px;line-height:1.1;background:rgba(140,110,30,.5);border-color:rgba(255,220,120,.7)}
-.tb[data-b=flip]{top:calc(10px + env(safe-area-inset-top));left:calc(100px + env(safe-area-inset-left))}
+.tb[data-b=flip]{top:calc(158px + env(safe-area-inset-top));left:calc(94px + env(safe-area-inset-left))}
+body.driving #ammo{display:none}
+@media (orientation:landscape){body.driving .tb[data-b=use]{top:calc(12px + env(safe-area-inset-top));left:calc(142px + env(safe-area-inset-left))}.tb[data-b=flip]{top:calc(12px + env(safe-area-inset-top));left:calc(222px + env(safe-area-inset-left))}}
+#steerHint{transition:opacity 1.5s}
+body.steerKnown #steerHint{opacity:0}
 #steer{position:absolute;width:200px;height:56px;margin:-28px 0 0 -100px;display:none;pointer-events:none}
 #steer.on{display:block}
 #steer .rail{position:absolute;left:0;right:0;top:24px;height:8px;border-radius:4px;background:rgba(255,255,255,.22)}
@@ -283,6 +287,6 @@ body.upright #rotateMsg{display:none!important}
   <button class="btn" id="bAgain">PLAY AGAIN</button>
   <button class="btn" id="bMenu">MENU</button>
 </div>
-<script type="module" src="main.js?v=mwb9zvp9"></script>
+<script type="module" src="main.js?v=mwbc5lo8"></script>
 </body>
 </html>
