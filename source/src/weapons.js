@@ -10,9 +10,10 @@ export const W = {
   ripper: { name: 'Ripper SMG', kind: 'smg', dmg: 80, rpm: 950, auto: true, mag: 40, reserve: 280, reload: 2.2, spread: 0.028, head: 2.2, pierce: 1, col: 0x3a2a40, sound: [1.3, 0.13] },
   widow: { name: 'Widowmaker', kind: 'sniper', dmg: 1600, rpm: 50, auto: false, mag: 5, reserve: 40, reload: 3.2, spread: 0.001, head: 4, pierce: 6, col: 0x23282a, sound: [0.35, 0.6], zoom: 2.6 },
   ion: { name: 'Ion Ray', kind: 'ray', dmg: 1400, rpm: 260, auto: false, mag: 20, reserve: 160, reload: 2.4, spread: 0.004, head: 1, pierce: 1, splash: 3.2, col: 0x1a5a2a, sound: [1.6, 0.35], wonder: true },
+  surge: { name: 'Surge Cannon', kind: 'wave', dmg: 1100, rpm: 70, auto: false, mag: 4, reserve: 28, reload: 3.0, spread: 0, head: 1, pierce: 1, wave: 14, col: 0x1a3a5a, sound: [1.0, 0.9], wonder: true },
 };
-export const BOX_POOL = ['ranger', 'viper', 'trench', 'kestrel', 'hammer', 'brawler', 'ripper', 'widow', 'ion', 'hammer', 'kestrel', 'ripper', 'ion'];
-export const PAP_NAMES = { pistol: 'Hellfire .45', ranger: 'Longshot Rapture', viper: 'Venom Kiss', trench: 'Doomsayer 24', kestrel: 'Raptor Reign', hammer: 'Anvil of Ruin', brawler: 'Judgment Day', ripper: 'Shredder Supreme', widow: 'Black Widow Queen', ion: 'Ion Annihilator' };
+export const BOX_POOL = ['ranger', 'viper', 'trench', 'kestrel', 'hammer', 'brawler', 'ripper', 'widow', 'ion', 'hammer', 'kestrel', 'ripper', 'ion', 'surge'];
+export const PAP_NAMES = { surge: 'Cataclysm Engine', pistol: 'Hellfire .45', ranger: 'Longshot Rapture', viper: 'Venom Kiss', trench: 'Doomsayer 24', kestrel: 'Raptor Reign', hammer: 'Anvil of Ruin', brawler: 'Judgment Day', ripper: 'Shredder Supreme', widow: 'Black Widow Queen', ion: 'Ion Annihilator' };
 
 export function makeGun(key, pap = false) {
   const d = W[key];

@@ -38,6 +38,7 @@ export function pollKeyboard() {
   if (inp.device !== 'kbm') return;
   inp.mx = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
   inp.my = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
+  inp.up = keys.has('Space') ? 1 : 0; inp.down = keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyZ') ? 1 : 0;
   inp.sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
   inp.gas = inp.my > 0 ? 1 : 0; inp.brake = inp.my < 0 ? 1 : 0;
 }

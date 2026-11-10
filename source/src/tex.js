@@ -5,7 +5,7 @@ import { rng } from './util.js';
 const cache = new Map();
 export let ANISO = 4;
 export function setAniso(a) { ANISO = a; for (const t of cache.values()) { t.anisotropy = a; t.needsUpdate = true; } }
-function make(key, w, h, draw, srgb = true) {
+export function make(key, w, h, draw, srgb = true) {
   if (cache.has(key)) return cache.get(key);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const x = c.getContext('2d'); draw(x, w, h);
@@ -14,13 +14,13 @@ function make(key, w, h, draw, srgb = true) {
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = ANISO;
   cache.set(key, t); return t;
 }
-function speckle(x, w, h, n, cols, s0, s1, seed) { const r = rng(seed); for (let i = 0; i < n; i++) { x.fillStyle = cols[(r() * cols.length) | 0]; const s = s0 + r() * (s1 - s0); x.fillRect(r() * w, r() * h, s, s); } }
-function blotches(x, w, h, n, col, r0, r1, seed) { const r = rng(seed); for (let i = 0; i < n; i++) { const cx = r() * w, cy = r() * h, rad = r0 + r() * (r1 - r0); for (const ox of [-w, 0, w]) for (const oy of [-h, 0, h]) { const g = x.createRadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, rad); g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(cx + ox - rad, cy + oy - rad, rad * 2, rad * 2); } } }
+export function speckle(x, w, h, n, cols, s0, s1, seed) { const r = rng(seed); for (let i = 0; i < n; i++) { x.fillStyle = cols[(r() * cols.length) | 0]; const s = s0 + r() * (s1 - s0); x.fillRect(r() * w, r() * h, s, s); } }
+export function blotches(x, w, h, n, col, r0, r1, seed) { const r = rng(seed); for (let i = 0; i < n; i++) { const cx = r() * w, cy = r() * h, rad = r0 + r() * (r1 - r0); for (const ox of [-w, 0, w]) for (const oy of [-h, 0, h]) { const g = x.createRadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, rad); g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(cx + ox - rad, cy + oy - rad, rad * 2, rad * 2); } } }
 // grime gradient from the bottom of a wall
-function bottomGrime(x, w, h, a) { const g = x.createLinearGradient(0, h, 0, h * 0.55); g.addColorStop(0, `rgba(25,20,15,${a})`); g.addColorStop(1, 'rgba(25,20,15,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }
+export function bottomGrime(x, w, h, a) { const g = x.createLinearGradient(0, h, 0, h * 0.55); g.addColorStop(0, `rgba(25,20,15,${a})`); g.addColorStop(1, 'rgba(25,20,15,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }
 
 // Bump map: derive a normal map from a grayscale height canvas
-function normalFrom(key, w, h, drawHeight, strength = 2) {
+export function normalFrom(key, w, h, drawHeight, strength = 2) {
   return make(key, w, h, (x) => {
     const c = document.createElement('canvas'); c.width = w; c.height = h; const hx = c.getContext('2d'); drawHeight(hx, w, h);
     const src = hx.getImageData(0, 0, w, h).data; const out = x.createImageData(w, h); const d = out.data;

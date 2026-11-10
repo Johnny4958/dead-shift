@@ -4,8 +4,9 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { inp, took, endFrame, setupInput, setDevice, pollKeyboard, pollGamepad, rumble, touchSprint } from './input.js';
 import { initAudio, setVolume, sfx, setEngine } from './audio.js';
 import { S, GW, GH, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, tileOf, cx, doors, windows, openZones, buildMap, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, lotSpawns } from './map.js';
-import { makeZombie, animZombie, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo } from './models.js';
+import { makeZombie, animZombie, warmZombies, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo } from './models.js';
 import { T, setAniso } from './tex.js';
+import { T2 } from './tex2.js';
 import { W, BOX_POOL, PAP_NAMES, makeGun } from './weapons.js';
 import { clamp, lerp, R, pick, angDiff, $ } from './util.js';
 import { buildWorld } from './world.js';
@@ -149,7 +150,20 @@ const PIECES = [{ kind: 'wall', name: 'Wall', cost: 250, hp: 900, tile: BWALL },
 const build = { on: false, sel: 0, rot: 0, ghost: null, gi: -1, gj: -1, ok: false };
 
 // ---------------- reset / start ----------------
+// boss heads on spikes near where you start: one per boss you drop this game
+const trophies = [];
+function addTrophy() {
+  const n = trophies.length; const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 1.5, 6), new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.9 })); pole.position.y = 0.75; g.add(pole);
+  const skin = new THREE.MeshStandardMaterial({ map: T2.zface ? T2.zface('#6f5f52') : null, color: 0x9a8a7a, roughness: 0.8 });
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), skin); head.scale.set(1, 1.15, 1.05); head.position.y = 1.62; head.rotation.y = Math.PI; g.add(head);
+  for (const sx of [-0.07, 0.07]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff3020 })); e.position.set(sx, 1.66, 0.18); g.add(e); }
+  const lab = new THREE.Sprite(new THREE.SpriteMaterial({ map: T.label('BOSS ' + (n + 1) + ' - RD ' + G.round, 'rgba(0,0,0,0.5)', '#ffcc66', 512, 96, 'bold 44px Arial'), transparent: true, depthWrite: false })); lab.scale.set(1.0, 0.19, 1); lab.position.y = 2.0; g.add(lab);
+  const spot = trophySpots[n % trophySpots.length]; g.position.set(spot.x, 0, spot.z); scene.add(g); trophies.push(g);
+  toast('Boss trophy added near the start (' + trophies.length + ')');
+}
 function clearAll() {
+  for (const t of trophies) scene.remove(t); trophies.length = 0;
   for (const z of zombies) scene.remove(z.m.root); zombies.length = 0;
   for (const p of pups) scene.remove(p.g); pups.length = 0;
   for (const g of gases) scene.remove(g.sp); gases.length = 0;
@@ -173,6 +187,10 @@ function newGame() {
   startRound(1); updHud();
 }
 const propTiles = []; for (let k = 0; k < grid.length; k++) if (grid[k] === 6) propTiles.push(k);
+const trophySpots = (() => { const out = [], si = tileOf(startPos.x), sj = tileOf(startPos.z); const c = [];
+  for (let di = -5; di <= 5; di++) for (let dj = -5; dj <= 5; dj++) { const i = si + di, j = sj + dj; if (!inb(i, j) || Math.hypot(di, dj) < 1.5) continue; let ok = true; for (let a = -1; a <= 1 && ok; a++) for (let b = -1; b <= 1; b++) if (!inb(i + a, j + b) || grid[idx(i + a, j + b)] !== FLOOR) { ok = false; break; } if (ok) c.push([Math.hypot(di, dj), i, j]); }
+  c.sort((p, q) => p[0] - q[0]); for (const [, i, j] of c.slice(0, 6)) out.push({ x: cx(i), z: cx(j) }); if (!out.length) out.push({ x: startPos.x + 1, z: startPos.z + 1 }); return out; })();
+setTimeout(() => { try { warmZombies(); } catch (e) { console.warn(e); } }, 50);
 function setPower(on) {
   G.power = on; WD.sw.lever.rotation.x = on ? -0.6 : 0.6; WD.sw.lamp.material.color.set(on ? 0x30ff40 : 0x441111);
   for (const p of WD.perks) { const lit = on || !p.needsPower; p.m.face.material?.forEach?.(() => {}); p.m.bulbM.color.set(lit ? p.col : 0x222222); p.m.glow.material.opacity = lit ? 0.35 : 0; const f = Array.isArray(p.m.face) ? null : p.m.face; if (f) f.emissiveIntensity = lit ? 0.8 : 0; }
@@ -184,7 +202,7 @@ const zCount = r => r <= 4 ? [6, 8, 13, 18][r - 1] : Math.min(24 + (r - 5) * 5, 
 const zHp = r => r < 10 ? 150 + 100 * (r - 1) : Math.round(950 * Math.pow(1.1, r - 9));
 const maxAlive = () => isTouch ? 16 : 24;
 function startRound(r) {
-  G.round = r; G.toSpawn = zCount(r); G.spawnT = r === 1 ? 3 : 1.5; G.between = false; G.pupsRound = 0; G.repairPts = 0;
+  G.round = r; G.toSpawn = zCount(r); G.bosses = r % 10 === 0 ? Math.min(3, r / 10) : 0; G.screamAdds = 0; G.spawnT = r === 1 ? 3 : 1.5; G.between = false; G.pupsRound = 0; G.repairPts = 0;
   if (r > 1) { P.nades = Math.min(4, P.nades + 2); sfx.round(true); center('ROUND ' + r + (r === 100 ? '<small>THE LAST ONE</small>' : ''), 3); }
   else center('DEAD SHIFT<small>SURVIVE THE NIGHT</small>', 3.5);
   drawRound(); $('round').classList.add('flash'); setTimeout(() => $('round').classList.remove('flash'), 1200); updHud();
@@ -193,14 +211,16 @@ function updRounds(dt) {
   if (G.between) { G.betweenT -= dt; if (G.betweenT <= 0) startRound(G.round + 1); return; }
   const alive = zombies.filter(z => !z.dead).length;
   G.spawnT -= dt;
+  if (G.bosses > 0 && G.toSpawn <= zCount(G.round) * (0.75 - 0.25 * (Math.min(3, G.round / 10) - G.bosses)) && alive < maxAlive() + 1) { G.bosses--; spawnZombie('boss'); updHud(); }
   if (G.toSpawn > 0 && alive < maxAlive() && G.spawnT <= 0) { spawnZombie(); G.toSpawn--; G.spawnT = Math.max(0.35, 2.0 - G.round * 0.08) * (0.6 + R() * 0.8); updHud(); }
-  if (G.toSpawn === 0 && alive === 0) { G.between = true; G.betweenT = 8; sfx.round(false); center(G.round === 100 ? 'YOU SURVIVED ROUND 100<small>KEEP GOING IF YOU DARE</small>' : 'ROUND ' + G.round + ' SURVIVED', 4); updHud(); }
+  if (G.toSpawn === 0 && alive === 0 && !(G.bosses > 0)) { G.between = true; G.betweenT = 8; sfx.round(false); center(G.round === 100 ? 'YOU SURVIVED ROUND 100<small>KEEP GOING IF YOU DARE</small>' : 'ROUND ' + G.round + ' SURVIVED', 4); updHud(); }
 }
 
 // ---------------- zombies ----------------
-function spawnZombie() {
+function spawnZombie(force) {
   const r = G.round, roll = R();
-  let type = 'walker'; if (r >= 6 && roll < 0.1) type = 'toxic'; else if (r >= 4 && roll < 0.24) type = 'fat'; else if (r >= 3 && roll < 0.42) type = 'runner';
+  let type = 'walker'; if (r >= 5 && roll < 0.05) type = 'screamer'; else if (r >= 6 && roll < 0.15) type = 'toxic'; else if (r >= 4 && roll < 0.28) type = 'fat'; else if (r >= 3 && roll < 0.46) type = 'runner';
+  if (force) type = force;
   const px = P.driving ? car.x : P.x, pz = P.driving ? car.z : P.z;
   let cand = spawns.filter(([i, j]) => { const d = Math.hypot(cx(i) - px, cx(j) - pz); return d > 12 && d < 50; }); if (!cand.length) cand = spawns.filter(([i, j]) => Math.hypot(cx(i) - px, cx(j) - pz) > 8); if (!cand.length) cand = spawns;
   const [si, sj] = pick(cand); let x = cx(si) + (R() - 0.5) * 1.4, z = cx(sj) + (R() - 0.5) * 1.4;
@@ -209,8 +229,10 @@ function spawnZombie() {
   if (type === 'runner') { sp = 3.9 + Math.min(r * 0.04, 1.2); hp *= 0.75; }
   if (type === 'fat') { sp = Math.min(0.9 + r * 0.05, 1.6); hp *= 2.3; }
   if (type === 'toxic') { sp = 1.7; hp *= 0.9; }
+  if (type === 'screamer') { sp = 2.3; hp *= 0.7; }
+  if (type === 'boss') { sp = 1.6 + Math.min(r * 0.01, 0.6); hp = zHp(r) * 14 + 4000; x = cx(si); z = cx(sj); sfx.zboss(Math.hypot(x - px, z - pz), 0); center('BOSS ZOMBIE<small>IT HEARD YOU</small>', 3); rumble(0.8, 0.8, 500); }
   m.root.position.set(x, -1.8, z); scene.add(m.root);
-  zombies.push({ m, type, x, z, hp, maxHp: hp, speed: sp, state: 'rise', t: 0, atk: 0, atkCd: 0, dead: false, deadT: 0, yaw: R() * 6.28, rip: 0, groanT: 2 + R() * 6, best: 1e9, stuckT: 0, cur: 0, head: false });
+  zombies.push({ m, type, x, z, hp, maxHp: hp, speed: sp, state: 'rise', t: 0, atk: 0, atkCd: 0, dead: false, deadT: 0, yaw: R() * 6.28, rip: 0, stun: 0, rage: 0, screamCd: 4 + R() * 4, screamT: 0, groanT: 2 + R() * 6, best: 1e9, stuckT: 0, cur: 0, head: false });
 }
 function losTo(x0, z0, x1, z1) { const d = Math.hypot(x1 - x0, z1 - z0); return gridRay(x0, z0, x1 - x0, z1 - z0, d, (t, k) => solidZombie(t, k) || t === WIN) >= d - 0.01; }
 const N8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -219,6 +241,13 @@ function updZombie(z, dt, tx, tz) {
   if (z.dead) { z.deadT += dt; const k = Math.min(1, z.deadT / 0.6); m.body.rotation.x = -k * Math.PI / 2 * z.fallDir; m.body.position.y = -k * 0.75 * (m.scale || 1) + Math.sin(k * Math.PI) * 0.2; const ss = CORPSE_T; if (z.deadT > ss) m.root.position.y = -(z.deadT - ss) * 0.8; if (z.deadT > ss + 1.6) { scene.remove(m.root); zombies.splice(zombies.indexOf(z), 1); } return; }
   if (z.state === 'rise') { z.t += dt; const k = Math.min(1, z.t / 1.4); m.root.position.y = -1.8 * (1 - k); m.root.rotation.y = z.yaw; animZombie(m, G.t, 0, 0.6, true); if (k >= 1) z.state = 'move'; return; }
   const dx = tx - z.x, dz = tz - z.z, dp = Math.hypot(dx, dz);
+  if (z.stun > 0) { z.stun -= dt; m.root.position.set(z.x, 0, z.z); animZombie(m, G.t, 0, 0, false); return; }
+  if (z.rage > 0) z.rage -= dt;
+  if (z.type === 'screamer') {
+    z.screamCd -= dt;
+    if (z.screamT > 0) { z.screamT -= dt; m.scream = Math.min(1, m.scream + dt * 4); z.yaw += angDiff(z.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 6); m.root.position.set(z.x, 0, z.z); m.root.rotation.y = z.yaw; animZombie(m, G.t, 0, 0, false); if (z.screamT <= 0) { m.scream = 0; screamAlert(z); } return; }
+    if (z.screamCd <= 0 && dp < 24 && dp > 3 && losTo(z.x, z.z, tx, tz)) { z.screamT = 1.5; z.screamCd = 14 + R() * 6; sfx.zscream(dp, zPan(dx, dz)); return; }
+  }
   const i = tileOf(z.x), j = tileOf(z.z), k = inb(i, j) ? idx(i, j) : 0;
   let gx = tx, gz = tz, mode = 'walk', target = null;
   if (!(dp < 8 && losTo(z.x, z.z, tx, tz))) {
@@ -230,19 +259,20 @@ function updZombie(z, dt, tx, tz) {
       else if (t === BWALL || t === BDOOR) { mode = 'piece'; target = pieces.find(p => p.k === bk); }
     }
   }
-  let speed = z.speed; const onT = grid[k];
+  let speed = z.speed * (z.rage > 0 ? 1.35 : 1); const onT = grid[k];
   if (onT === WIN) speed *= 0.45;
   if (onT === SPIKE) { speed *= 0.5; const p = pieces.find(q => q.k === k); z.hp -= 160 * dt * Math.max(1, G.round / 6); if (p) { p.hp -= 12 * dt; if (p.hp <= 0) removePiece(p); } if (R() < dt * 2) sfx.spike(); if (z.hp <= 0) { killZombie(z, 'spike'); return; } }
   let mvx = gx - z.x, mvz = gz - z.z; const ml = Math.hypot(mvx, mvz);
   let attacking = false;
   if (mode === 'window' && ml < 0.35) { attacking = true; z.yaw = Math.atan2(-target.outDir[0], -target.outDir[1]); z.rip += dt; if (z.rip > 1.5) { z.rip = 0; target.planks = Math.max(0, target.planks - 1); WD.planks[target.id].list[target.planks].visible = false; sfx.plank(); G.flowDirty = true; } }
   else if (mode === 'piece' && target && Math.hypot(target.x - z.x, target.z - z.z) < 1.55) { attacking = true; z.yaw = Math.atan2(target.x - z.x, target.z - z.z); target.hp -= 30 * dt; if (R() < dt * 1.2) sfx.plank(); if (target.hp <= 0) removePiece(target); }
-  else if (dp < 1.25 + (z.type === 'fat' ? 0.2 : 0)) { attacking = true; z.yaw = Math.atan2(dx, dz); }
+  else if (dp < 1.25 + (z.type === 'fat' ? 0.2 : z.type === 'boss' ? 0.5 : 0)) { attacking = true; z.yaw = Math.atan2(dx, dz); }
   else if (ml > 0.01) { const st = Math.min(ml, speed * dt); z.x += mvx / ml * st; z.z += mvz / ml * st; z.yaw += angDiff(z.yaw, Math.atan2(mvx, mvz)) * Math.min(1, dt * 8); }
   // player attack
   z.atkCd -= dt;
-  if (dp < 1.3 + (z.type === 'fat' ? 0.2 : 0) && z.atkCd <= 0 && z.atk === 0) z.atk = 0.001;
-  if (z.atk > 0) { const prev = z.atk; z.atk += dt / 0.8; if (prev < 0.5 && z.atk >= 0.5 && dp < 1.6) hurt(P.driving ? 18 : 34); if (z.atk >= 1) { z.atk = 0; z.atkCd = 0.4; } }
+  const reachX = z.type === 'fat' ? 0.2 : z.type === 'boss' ? 0.6 : 0;
+  if (dp < 1.3 + reachX && z.atkCd <= 0 && z.atk === 0) { z.atk = 0.001; if (R() < 0.6) sfx.zattack(z.type, dp, zPan(dx, dz)); }
+  if (z.atk > 0) { const prev = z.atk; z.atk += dt / (z.type === 'boss' ? 1.0 : 0.8); if (prev < 0.5 && z.atk >= 0.5 && dp < 1.6 + reachX && P.y < 1.2) hurt(z.type === 'boss' ? (P.driving ? 30 : 60) : P.driving ? 18 : 34); if (z.atk >= 1) { z.atk = 0; z.atkCd = 0.4; } }
   const p = { x: z.x, z: z.z }; collide(p, 0.3, solidZombie); z.x = p.x; z.z = p.z;
   // progress / stuck
   const d = dist[k]; if (d < z.best - 0.5) { z.best = d; z.stuckT = 0; } else z.stuckT += dt;
@@ -250,7 +280,14 @@ function updZombie(z, dt, tx, tz) {
   m.root.position.set(z.x, 0, z.z); m.root.rotation.y = z.yaw;
   z.cur = lerp(z.cur, attacking ? 0 : speed, Math.min(1, dt * 6));
   animZombie(m, G.t, z.cur, Math.max(attacking ? 0.5 + 0.5 * Math.sin(G.t * 6) : 0, z.atk > 0 ? Math.sin(z.atk * Math.PI) : 0), onT === WIN);
-  z.groanT -= dt; if (z.groanT <= 0) { z.groanT = 3 + R() * 7; if (dp < 30) { const rel = angDiff(P.yaw, Math.atan2(-dx, -dz)); sfx.groan(clamp(-Math.sin(rel), -1, 1), dp); } }
+  z.groanT -= dt; if (z.groanT <= 0) { z.groanT = 3 + R() * 7; if (dp < 30) { if (z.type === 'boss' && R() < 0.4) sfx.zboss(dp, zPan(dx, dz)); else sfx.zgroan(z.type, dp, zPan(dx, dz)); } }
+}
+function zPan(dx, dz) { const rel = angDiff(P.yaw, Math.atan2(-dx, -dz)); return clamp(-Math.sin(rel), -1, 1); }
+// a screamer's shriek enrages nearby zombies and calls a few more in
+function screamAlert(z) {
+  for (const q of zombies) if (!q.dead && q !== z && Math.hypot(q.x - z.x, q.z - z.z) < 30) q.rage = 9;
+  if (G.screamAdds < 8) { G.toSpawn += 2; G.screamAdds += 2; }
+  toast('A screamer called the horde'); updHud();
 }
 function separate() {
   for (let a = 0; a < zombies.length; a++) { const A = zombies[a]; if (A.dead || A.state === 'rise') continue;
@@ -260,14 +297,15 @@ function separate() {
 }
 function damageZombie(z, dmg, head, how) {
   if (z.dead) return;
-  if (G.insta > 0) dmg = 1e12;
+  if (G.insta > 0 && z.type !== 'boss') dmg = 1e12;
   z.hp -= dmg; sfx.hit(head);
-  if (z.hp <= 0) killZombie(z, how, head); else { addPts(10); hitMark(false); }
+  if (z.hp <= 0) killZombie(z, how, head); else { addPts(10); hitMark(false); if (R() < 0.2) sfx.zhurt(z.type, Math.hypot(z.x - P.x, z.z - P.z), zPan(z.x - P.x, z.z - P.z)); }
 }
 function killZombie(z, how, head) {
   z.dead = true; z.deadT = 0; z.fallDir = R() < 0.5 ? 1 : -1;
   { const dead = zombies.filter(q => q.dead && q !== z && q.deadT < CORPSE_T); if (dead.length >= MAX_CORPSES) { dead.sort((a, b) => b.deadT - a.deadT); for (let n = 0; n <= dead.length - MAX_CORPSES; n++) dead[n].deadT = CORPSE_T; } } G.kills++; if (head) G.heads++;
-  addPts(how === 'knife' ? 130 : head ? 100 : how === 'nuke' ? 0 : 60); hitMark(true); sfx.kill();
+  addPts(z.type === 'boss' ? 1500 : how === 'knife' ? 130 : head ? 100 : how === 'nuke' ? 0 : 60); hitMark(true); sfx.kill(); if (how !== 'nuke' || R() < 0.2) sfx.zdeath(z.type, Math.hypot(z.x - P.x, z.z - P.z), zPan(z.x - P.x, z.z - P.z));
+  if (z.type === 'boss') { addTrophy(); dropPup(z.x, z.z, 'max'); }
   spriteFx(T.blood(), 0xffffff, z.x, 1.1, z.z, 0.9, 0.5, { grow: 1.5 });
   if (z.type === 'toxic') { sfx.toxic(); const sp = spriteFx(T.puff(), 0x60ff40, z.x, 1, z.z, 3.5, 6, { op: 0.55, grow: 0.4 }); gases.push({ x: z.x, z: z.z, t: 6 }); }
   if (how !== 'nuke' && G.pupsRound < 4 && R() < 0.035) dropPup(z.x, z.z);
@@ -289,7 +327,7 @@ function takePup(p) {
   if (p.kind === 'max') { for (const g of P.guns) { g.reserve = g.maxReserve; } P.nades = Math.max(P.nades, 4); }
   if (p.kind === 'insta') G.insta = 30;
   if (p.kind === 'dbl') G.dbl = 30;
-  if (p.kind === 'nuke') { $('flash').style.opacity = 1; flashT = 1; for (const z of zombies) if (!z.dead && z.state !== 'rise') killZombie(z, 'nuke'); for (const z of zombies) if (!z.dead) killZombie(z, 'nuke'); addPts(400); sfx.boom(); }
+  if (p.kind === 'nuke') { $('flash').style.opacity = 1; flashT = 1; for (const z of zombies) if (!z.dead && z.type !== 'boss') killZombie(z, 'nuke'); addPts(400); sfx.boom(); }
   if (p.kind === 'carp') { for (const w of windows) { w.planks = 6; WD.planks[w.id].list.forEach(q => q.visible = true); } G.flowDirty = true; addPts(200); }
   updHud();
 }
@@ -325,14 +363,15 @@ const rayO = new THREE.Vector3(), rayD = new THREE.Vector3();
 function fireGun() {
   const g = gunNow(); if (!g) return;
   g.clip--; P.fireT = 60 / (g.rpm * (P.perks.has('double') ? 1.33 : 1)); P.recoil = Math.min(1, P.recoil + 0.35);
-  const d = g.def; sfx.shot(d.sound[0], d.sound[1], !!d.wonder); rumble(0.3, 0.6, 60);
+  const d = g.def; sfx.shot(d.sound[0], d.sound[1], !!d.wonder, d.kind); rumble(0.3, 0.6, 60);
   camera.getWorldPosition(rayO);
   const pellets = d.pellets || 1;
   for (let n = 0; n < pellets; n++) {
     const spr = d.spread * (P.ads > 0.5 ? 0.35 : 1) * (P.speed > 1 ? 1.6 : 1);
     rayD.set((R() - 0.5) * 2 * spr, (R() - 0.5) * 2 * spr, -1).normalize().applyQuaternion(camera.quaternion);
-    shootRay(rayO, rayD, g);
+    if (!d.wave) shootRay(rayO, rayD, g);
   }
+  if (d.wave) waveBlast(rayO, rayD, g);
   P.pitch = clamp(P.pitch + 0.006 + d.sound[1] * 0.01, -1.45, 1.45);
   muzzleT = 0.05; updHud();
   if (g.clip === 0) startReload();
@@ -340,6 +379,20 @@ function fireGun() {
 let muzzleT = 0;
 const muzzle = new THREE.Sprite(new THREE.SpriteMaterial({ map: T.glow(), color: 0xffc070, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })); muzzle.scale.set(0.25, 0.25, 1); vmScene.add(muzzle);
 const headP = new THREE.Vector3(), bodyP = new THREE.Vector3();
+// Surge Cannon: a cone shockwave that hits every zombie in front of you and throws them back
+function waveBlast(o, d, g) {
+  const range = g.def.wave * (g.pap ? 1.3 : 1), fx = d.x, fz = d.z, fl = Math.hypot(fx, fz) || 1;
+  for (let n = 1; n <= 5; n++) { const t = n * range / 5.5; spriteFx(T.glow(), 0x60c8ff, o.x + fx / fl * t, 1.1, o.z + fz / fl * t, 0.8 + n * 0.7, 0.3 + n * 0.05, { add: true, grow: 3 }); }
+  for (const z of zombies) {
+    if (z.dead || z.state === 'rise') continue;
+    const ox = z.x - o.x, oz = z.z - o.z, dd = Math.hypot(ox, oz); if (dd > range || dd < 0.01) continue;
+    if ((ox * fx + oz * fz) / (dd * fl) < 0.78) continue; // ~38 degree half-angle
+    if (!losTo(o.x, o.z, z.x, z.z)) continue;
+    const k = 1 - dd / (range * 1.15);
+    const push = (z.type === 'boss' ? 0.6 : z.type === 'fat' ? 1.6 : 3.2) * k; const p = { x: z.x + ox / dd * push, z: z.z + oz / dd * push }; collide(p, 0.3, solidZombie); z.x = p.x; z.z = p.z;
+    z.stun = 0.8 * k; damageZombie(z, g.dmg * (0.4 + 0.6 * k), false, 'gun');
+  }
+}
 function shootRay(o, d, g) {
   const hl = Math.hypot(d.x, d.z); let maxT = 150;
   if (hl > 1e-4) maxT = gridRay(o.x, o.z, d.x, d.z, 150 * hl, t => blocksBullet(t)) / hl;
@@ -349,7 +402,7 @@ function shootRay(o, d, g) {
   for (const z of zombies) {
     if (z.dead || z.state === 'rise' && z.t < 0.7) continue;
     if (Math.hypot(z.x - o.x, z.z - o.z) > maxT + 2) continue;
-    const sc = z.m.scale || 1; z.m.head.getWorldPosition(headP); z.m.spine.getWorldPosition(bodyP); bodyP.y += 0.25 * sc;
+    const sc = z.m.scale || 1; z.m.root.updateMatrixWorld(true); headP.copy(z.m.headC); z.m.head.localToWorld(headP); bodyP.copy(z.m.bodyC); z.m.spine.localToWorld(bodyP);
     const tests = [[headP, 0.17 * sc, true], [bodyP, (z.type === 'fat' ? 0.48 : 0.32) * sc, false]];
     let bestT = Infinity, head = false;
     for (const [c, r, hd] of tests) { const ox = c.x - o.x, oy = c.y - o.y, oz = c.z - o.z; const t = ox * d.x + oy * d.y + oz * d.z; if (t < 0) continue; const d2 = ox * ox + oy * oy + oz * oz - t * t; if (d2 < r * r) { const tt = t - Math.sqrt(r * r - d2); if (tt < bestT) { bestT = tt; head = hd; } } }
@@ -490,8 +543,17 @@ function update(dt) {
     let sp = (sprint ? 6.4 : 4.2) * (P.perks.has('stamina') ? 1.15 : 1) * (inp.aim ? 0.6 : 1);
     const ml = Math.min(1, Math.hypot(inp.mx, inp.my)); const fx_ = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
     let vx = (fx_ * inp.my + rx * inp.mx), vz = (fz * inp.my + rz * inp.mx); const vl = Math.hypot(vx, vz); if (vl > 1e-4) { vx = vx / vl * ml * sp; vz = vz / vl * ml * sp; } else vx = vz = 0;
+    if (G.fly) { // admin flight: fly where you look, no walls. Space/Ctrl (or Z) for straight up/down on keyboard.
+      const fs = (inp.sprint || touchSprint() ? 26 : 12) * ml, cp = Math.cos(P.pitch), dl = Math.hypot(inp.mx, inp.my) || 1;
+      const fwd = inp.my / dl, side = inp.mx / dl;
+      P.x += (fx_ * cp * fwd + rx * side) * fs * dt; P.z += (fz * cp * fwd + rz * side) * fs * dt;
+      P.y += (Math.sin(P.pitch) * fwd * fs + ((inp.up || 0) - (inp.down || 0)) * 10) * dt;
+      P.x = clamp(P.x, 1, GW * S - 1); P.z = clamp(P.z, 1, GH * S - 1); P.y = clamp(P.y, 0, 90); P.vy = 0; P.speed = 0; P.sprinting = false;
+    } else {
     const p = { x: P.x + vx * dt, z: P.z + vz * dt }; collide(p, 0.35, (t, k) => solidPlayer(t, k) || t === BWALL); P.x = p.x; P.z = p.z; P.speed = Math.hypot(vx, vz); P.sprinting = sprint && P.speed > 1;
     if (took('jump') && P.y <= 0) P.vy = 4.6; P.vy -= 14 * dt; P.y = Math.max(0, P.y + P.vy * dt); if (P.y === 0) P.vy = Math.max(0, P.vy);
+    if (P.y > 0 && P.vy === 0 && !G.fly) P.vy = -0.01; // dropping out of flight: fall back down
+    }
     P.bob += P.speed * dt * 1.8;
     // weapons
     const g = gunNow();
@@ -557,15 +619,15 @@ function render(dt) {
   }
   const g = gunNow(); const zoom = g && g.def.zoom && P.ads > 0.8 ? g.def.zoom : 1;
   const fov = (camera.userData.fov || SET.fov) / (1 + P.ads * 0.25) / zoom; if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
-  $('scope').style.opacity = zoom > 1 ? 1 : 0; $('cross').classList.toggle('hide', P.ads > 0.6 || P.driving);
+  $('scope').style.opacity = zoom > 1 ? 1 : 0; const scoped = zoom > 1; $('cross').classList.toggle('hide', scoped || P.driving); $('cross').classList.toggle('ads', P.ads > 0.6 && !scoped);
   // soldier (third person)
   soldier.wrap.visible = tp && !P.driving; if (soldier.wrap.visible) { soldier.wrap.position.set(P.x, P.y, P.z); soldier.wrap.rotation.y = P.yaw; animSoldier(soldier, G.t, P.speed, P.pitch, P.sprinting); }
   // viewmodel
-  vm.visible = !tp && !build.on; const ads = P.ads, rl = P.reloadT > 0 ? Math.sin(Math.min(1, 1 - P.reloadT / (P.reloadMax || 1)) * Math.PI) : 0;
+  vm.visible = !tp && !build.on && !(g && g.def.zoom && P.ads > 0.8); const ads = P.ads, rl = P.reloadT > 0 ? Math.sin(Math.min(1, 1 - P.reloadT / (P.reloadMax || 1)) * Math.PI) : 0;
   const sw = P.swapT > 0 ? P.swapT / 0.4 : 0, kn = P.knifeT > 0 ? Math.sin((0.5 - P.knifeT) / 0.5 * Math.PI) : 0;
-  vm.position.set(lerp(0.17, 0, ads) + kn * -0.1, lerp(-0.19, -0.095, ads) - rl * 0.12 - sw * 0.3 + Math.sin(P.bob * 2) * 0.008 * (1 - ads), lerp(-0.38, -0.27, ads) + P.recoil * 0.05 - kn * 0.15);
-  vm.rotation.set(rl * 0.6 + P.recoil * 0.08 + (P.sprinting ? -0.35 : 0), (P.sprinting ? 0.6 : 0) + kn * 0.8, rl * 0.4);
-  if (muzzleT > 0) { muzzleT -= dt; muzzle.visible = !tp; muzzle.position.set(vm.position.x, vm.position.y + 0.06, vm.position.z - 0.55); } else muzzle.visible = false;
+  const sightY = vmGun ? vmGun.sight : 0.095; vm.position.set(lerp(0.17, 0, ads) + kn * -0.1, lerp(-0.19, -sightY, ads) - rl * 0.12 - sw * 0.3 + Math.sin(P.bob * 2) * 0.008 * (1 - ads), lerp(-0.38, -0.27, ads) + P.recoil * 0.05 - kn * 0.15);
+  vm.rotation.set(rl * 0.6 + P.recoil * 0.08 * (1 - ads * 0.85) + (P.sprinting ? -0.35 : 0), (P.sprinting ? 0.6 : 0) + kn * 0.8, rl * 0.4);
+  if (muzzleT > 0) { muzzleT -= dt; muzzle.visible = !tp; muzzle.position.set(vm.position.x, vm.position.y + (vmGun ? vmGun.muzzle.position.y : 0.06), vm.position.z + (vmGun ? vmGun.muzzle.position.z : -0.55)); } else muzzle.visible = false;
   // shadows follow the player
   WD.moonL.position.set(P.x - 30, 60, P.z - 40); WD.moonL.target.position.set(P.x, 0, P.z);
   renderer.clear(); renderer.render(scene, camera);
@@ -608,6 +670,7 @@ function admSync() {
   $('admPts').textContent = G.points.toLocaleString();
   for (const b of $('admPapSeg').children) b.classList.toggle('on', (+b.dataset.v === 1) === admPap);
   $('admExtra').children[1].textContent = 'GOD MODE: ' + (G.god ? 'ON' : 'OFF'); $('admExtra').children[1].classList.toggle('on', !!G.god);
+  $('admExtra').children[2].textContent = 'FLY: ' + (G.fly ? 'ON' : 'OFF'); $('admExtra').children[2].classList.toggle('on', !!G.fly);
 }
 function admMsg(t) { $('admMsg').textContent = t; }
 $('admGuns').innerHTML = Object.keys(W).map(k => `<button data-k="${k}">${W[k].name}</button>`).join('');
@@ -638,6 +701,7 @@ for (const b of $('admMoney').children) b.onclick = () => { const n = +b.dataset
 for (const b of $('admPapSeg').children) b.onclick = () => { admPap = b.dataset.v === '1'; admSync(); };
 for (const b of $('admGuns').children) b.onclick = () => { giveGun(b.dataset.k, admPap); updHud(); admMsg('You now have the ' + gunNow().name + '.'); };
 $('admExtra').children[0].onclick = () => { for (const g of P.guns) { g.clip = g.mag; g.reserve = g.maxReserve; } P.nades = Math.max(P.nades, 4); updHud(); admMsg('Ammo and grenades refilled.'); };
+$('admExtra').children[2].onclick = () => { G.fly = !G.fly; if (!G.fly) P.vy = -0.01; admSync(); admMsg(G.fly ? 'Flight on: fly where you look. Keyboard: Space up, Ctrl or Z down, Shift fast. Phone/controller: look up or down while moving.' : 'Flight off: you drop back to the ground.'); };
 $('admExtra').children[1].onclick = () => { G.god = !G.god; admSync(); admMsg(G.god ? 'God mode on: zombies cannot hurt you.' : 'God mode off.'); };
 $('bSetBack').onclick = () => show(back); $('bCtlBack').onclick = () => show(back);
 function syncSet() {
@@ -660,4 +724,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie };
+window.__ds = { fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie };

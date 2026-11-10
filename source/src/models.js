@@ -22,7 +22,9 @@ export const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
 export const C = (r1, r2, h, s = 10) => new THREE.CylinderGeometry(r1, r2, h, s);
 
 // ---------------------------------------------------------------------------
-// Zombies
+// Zombies live in zombies.js
+export { makeZombie, animZombie, warmZombies } from './zombies.js';
+// shared body parts still used by the third-person soldier
 const ZG = () => once('zg', () => ({
   torso: new THREE.CapsuleGeometry(0.19, 0.34, 4, 10),
   pelvis: new THREE.CapsuleGeometry(0.16, 0.08, 4, 8),
@@ -46,92 +48,6 @@ const ZM = () => once('zm', () => {
   return { skins, shirts, pants, toxicSkin, toxicCloth, fatSkin, eyes, eyesG, eyesR };
 });
 
-// One zombie = ~15 separate meshes (a draw call each). skinify() folds them into ONE SkinnedMesh
-// whose bones are the existing joint groups, so animation code is unchanged but the zombie costs
-// 4 draw calls (one per material) instead of ~15. Merged geometry is cached per zombie type.
-const SKIN_CACHE = {};
-const _inv = new THREE.Matrix4(), _mm = new THREE.Matrix4();
-function skinify(type, root, meshes, roleOf, matList) {
-  root.updateMatrixWorld(true);
-  _inv.copy(root.matrixWorld).invert();
-  const bones = [];
-  for (const o of meshes) if (!bones.includes(o.parent)) bones.push(o.parent);
-  let geo = SKIN_CACHE[type];
-  if (!geo) {
-    const byRole = [[], [], [], []];
-    for (const o of meshes) {
-      let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
-      for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
-      if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
-      g.applyMatrix4(_mm.multiplyMatrices(_inv, o.matrixWorld));
-      const n = g.attributes.position.count, bi = bones.indexOf(o.parent);
-      const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
-      for (let i = 0; i < n; i++) { si[i * 4] = bi; sw[i * 4] = 1; }
-      g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4)); g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
-      byRole[roleOf[o.material.uuid] ?? 2].push(g);
-    }
-    const list = [], counts = [];
-    for (const r of byRole) { if (r.length) { const m = mergeGeometries(r, false); list.push(m); counts.push(m.attributes.position.count); } else counts.push(0); }
-    geo = mergeGeometries(list, false); geo.clearGroups();
-    let start = 0; counts.forEach((c, i) => { if (c) geo.addGroup(start, c, i); start += c; });
-    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.6);
-    SKIN_CACHE[type] = geo;
-  }
-  const sk = new THREE.SkinnedMesh(geo, matList);
-  sk.castShadow = true; root.add(sk); sk.updateMatrixWorld(true);
-  sk.bind(new THREE.Skeleton(bones));
-  for (const o of meshes) { o.visible = false; o.castShadow = false; }
-}
-export function makeZombie(type) {
-  const g = ZG(), m = ZM();
-  const pickA = a => a[(Math.random() * a.length) | 0];
-  let skin = pickA(m.skins), shirt = pickA(m.shirts), pant = pickA(m.pants), eye = m.eyes;
-  if (type === 'toxic') { skin = m.toxicSkin; shirt = m.toxicCloth; pant = m.toxicCloth; eye = m.eyesG; }
-  if (type === 'fat') { skin = m.fatSkin; }
-  if (type === 'runner') eye = m.eyesR;
-  const root = new THREE.Group();
-  const body = new THREE.Group(); root.add(body);              // leans/falls
-  const hips = new THREE.Group(); hips.position.y = 0.95; body.add(hips);
-  const pelvis = new THREE.Mesh(g.pelvis, pant); pelvis.rotation.z = Math.PI / 2; pelvis.scale.set(1, 1.2, 0.8); hips.add(pelvis);
-  const spine = new THREE.Group(); hips.add(spine);
-  const torso = new THREE.Mesh(g.torso, shirt); torso.position.y = 0.3; torso.scale.set(1.25, 1, 0.75); spine.add(torso);
-  const neck = new THREE.Group(); neck.position.y = 0.66; spine.add(neck);
-  const head = new THREE.Mesh(g.head, skin); head.position.y = 0.08; neck.add(head);
-  const eyes = new THREE.Mesh(g.eyes, eye); head.add(eyes);
-  const arm = (s) => { const sh = new THREE.Group(); sh.position.set(0.28 * s, 0.53, 0); spine.add(sh); const u = new THREE.Mesh(g.upper, shirt); sh.add(u); const el = new THREE.Group(); el.position.y = -0.31; sh.add(el); const f = new THREE.Mesh(g.fore, skin); el.add(f); return { sh, el }; };
-  const leg = (s) => { const hp = new THREE.Group(); hp.position.set(0.11 * s, -0.02, 0); hips.add(hp); const th = new THREE.Mesh(g.thigh, pant); hp.add(th); const kn = new THREE.Group(); kn.position.y = -0.45; hp.add(kn); const sn = new THREE.Mesh(g.shin, pant); kn.add(sn); return { hp, kn }; };
-  const aL = arm(-1), aR = arm(1), lL = leg(-1), lR = leg(1);
-  let sc = 1;
-  if (type === 'fat') { torso.scale.set(1.9, 1.15, 1.55); pelvis.scale.set(1.6, 1.6, 1.3); aL.sh.position.x = -0.38; aR.sh.position.x = 0.38; lL.hp.position.x = -0.17; lR.hp.position.x = 0.17; sc = 1.22; }
-  if (type === 'runner') { torso.scale.set(1.0, 1.05, 0.62); sc = 1.04; root.scale.set(0.9, 1, 0.9); }
-  if (type === 'toxic') sc = 1.02;
-  root.scale.multiplyScalar(sc);
-  const all = []; root.traverse(o => { if (o.isMesh) { o.castShadow = true; all.push(o); } });
-  eyes.castShadow = false;
-  // random posture so the horde does not move in lockstep
-  skinify(type, root, all, { [pant.uuid]: 0, [shirt.uuid]: 1, [skin.uuid]: 2, [eye.uuid]: 3 }, [pant, shirt, skin, eye]);
-  const r = { root, body, hips, spine, neck, head, aL, aR, lL, lR, meshes: all, scale: sc, phase: Math.random() * 10, armUp: 0.6 + Math.random() * 0.8, limp: Math.random() < 0.3 ? 0.4 : 0, tilt: (Math.random() - 0.5) * 0.5 };
-  return r;
-}
-// procedural gait: speed in m/s, mode 'walk'|'run', attack 0..1
-export function animZombie(z, t, speed, attack, climb) {
-  const run = speed > 2.2; const f = run ? 2.4 + speed * 0.5 : 1.3 + speed * 0.9; const ph = t * f + z.phase; const s = Math.sin(ph), c = Math.cos(ph);
-  const amp = Math.min(1, speed / (run ? 4 : 1.6));
-  z.lL.hp.rotation.x = s * (run ? 0.9 : 0.5) * amp; z.lR.hp.rotation.x = -s * (run ? 0.9 : 0.5) * amp * (1 - z.limp);
-  z.lL.kn.rotation.x = Math.max(0, -c) * (run ? 1.3 : 0.6) * amp; z.lR.kn.rotation.x = Math.max(0, c) * (run ? 1.3 : 0.6) * amp;
-  z.hips.position.y = 0.95 - Math.abs(c) * 0.05 * amp - (run ? 0.06 : 0);
-  z.spine.rotation.x = run ? 0.45 : 0.18 + Math.sin(t * 0.7 + z.phase) * 0.05;
-  z.spine.rotation.z = z.tilt * 0.3 + s * 0.06 * amp;
-  z.neck.rotation.z = z.tilt + Math.sin(t * 1.3 + z.phase) * 0.1; z.neck.rotation.x = run ? -0.3 : -0.1;
-  const reach = run ? 1.0 : z.armUp;
-  const sw = run ? c * 0.9 : Math.sin(t * 1.7 + z.phase) * 0.12;
-  z.aL.sh.rotation.x = -reach - sw - attack * 1.2; z.aR.sh.rotation.x = -reach + sw - attack * 1.4 * Math.max(0, Math.sin(t * 14));
-  z.aL.sh.rotation.z = 0.08; z.aR.sh.rotation.z = -0.08;
-  z.aL.el.rotation.x = -0.3 - attack * 0.4; z.aR.el.rotation.x = -0.25 - attack * 0.6 * Math.max(0, Math.cos(t * 14));
-  if (climb) { z.spine.rotation.x = 0.9; z.aL.sh.rotation.x = -2.2; z.aR.sh.rotation.x = -2.0; z.lL.hp.rotation.x = -1.0; z.lL.kn.rotation.x = 1.4; }
-}
-
-// ---------------------------------------------------------------------------
 // Third-person soldier
 export function makeSoldier() {
   const g = ZG();

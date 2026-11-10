@@ -23,6 +23,7 @@ function mats() {
     red: new THREE.MeshBasicMaterial({ color: 0xff2020 }),
     pap: std({ map: T.pap(), emissive: 0x6a1ab0, emissiveIntensity: 0.55, metalness: 0.5, roughness: 0.3 }),
     glow: new THREE.MeshBasicMaterial({ color: 0x66ff88 }),
+    glowB: new THREE.MeshBasicMaterial({ color: 0x60c8ff }),
     glowP: new THREE.MeshBasicMaterial({ color: 0xe080ff }),
   };
   return MATS;
@@ -36,6 +37,8 @@ function clean(g) {
   return g;
 }
 
+// measured from each model: front-sight tip, red-dot centre or scope axis, in metres above the bore line origin
+const SIGHT = { pistol: 0.099, ranger: 0.102, viper: 0.117, ripper: 0.117, trench: 0.095, kestrel: 0.128, hammer: 0.136, brawler: 0.107, widow: 0.136, ion: 0.148, surge: 0.152 };
 export function makeGun(key, pap) {
   const m = mats();
   const parts = new Map();
@@ -178,9 +181,20 @@ export function makeGun(key, pap) {
       side([[-0.036, 0.024], [0.012, 0.024], [-0.004, -0.088], [-0.012, -0.096], [-0.05, -0.096], [-0.058, -0.08]], 0.04, 'poly', 0.008);
       guard(0.02, 0.02); mf = 0.37; my = 0.058; break;
     }
+    case 'surge': { // shockwave cannon: chunky body, coil stack and a flared dish muzzle
+      side([[-0.12, 0.02], [0.18, 0.025], [0.24, 0.05], [0.2, 0.11], [-0.08, 0.12], [-0.13, 0.09]], 0.09, 'metal', 0.016);
+      for (let i = 0; i < 5; i++) put(new THREE.TorusGeometry(0.07, 0.014, 8, 18), 'steel', 0.02 + i * 0.06, 0.07);
+      tube(-0.02, 0.3, 0.034, 0.07, 'glowB', 12);
+      tube(0.3, 0.42, 0.11, 0.07, 'steel', 18, 0.04);
+      put(new THREE.TorusGeometry(0.105, 0.012, 6, 20), 'glowB', 0.42, 0.07);
+      put(new THREE.SphereGeometry(0.05, 14, 10), 'glowB', -0.06, 0.15); put(new THREE.TorusGeometry(0.052, 0.009, 6, 16).rotateX(Math.PI / 2), 'steel', -0.06, 0.15);
+      side([[-0.04, 0.024], [0.012, 0.024], [-0.004, -0.09], [-0.012, -0.1], [-0.05, -0.1], [-0.06, -0.08]], 0.045, 'poly', 0.008);
+      guard(0.02, 0.02); mf = 0.42; my = 0.07; break;
+    }
   }
   const group = new THREE.Group();
   for (const [M, list] of parts) { const mesh = new THREE.Mesh(mergeGeometries(list, false), M); mesh.castShadow = true; group.add(mesh); }
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, my, -mf); group.add(muzzle);
-  return { group, muzzle };
+  // sight: height of the aiming point (front post tip / red dot / scope axis). Aiming down sights puts this exactly on the crosshair.
+  return { group, muzzle, sight: SIGHT[key] ?? 0.11 };
 }
