@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { inp, took, endFrame, setupInput, setDevice, pollKeyboard, pollGamepad, rumble, touchSprint } from './input.js';
 import { initAudio, setVolume, sfx, setEngine } from './audio.js';
-import { S, GW, GH, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, tileOf, cx, doors, windows, openZones, buildMap, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, lotSpawns } from './map.js';
+import { S, GW, GH, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, tileOf, cx, doors, windows, openZones, buildMap, computeSpawns, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, lotSpawns } from './map.js';
 import { makeZombie, animZombie, warmZombies, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo } from './models.js';
 import { T, setAniso } from './tex.js';
 import { T2 } from './tex2.js';
@@ -76,8 +76,9 @@ const V3 = new THREE.Vector3(), V3b = new THREE.Vector3();
 const G = { state: 'title', t: 0, round: 0, toSpawn: 0, spawnT: 0, between: false, betweenT: 0, kills: 0, heads: 0, points: 0, power: false, flowT: 0, flowDirty: true, lastFlowK: -1, insta: 0, dbl: 0, pupsRound: 0, repairPts: 0, god: false, mapDirty: true };
 const P = { x: 0, z: 0, y: 0, vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, guns: [], cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, perks: new Set(), view: 'fp', bob: 0, ads: 0, recoil: 0, repT: 0, driving: false, semi: false, heartT: 0, speed: 0 };
 const zombies = []; const pups = []; const gases = []; const nades = []; const pieces = [];
+computeSpawns();
 const spawns = lotSpawns.filter(([i, j]) => grid[idx(i, j)] === OUT);
-const startPos = { x: cx(21) + 1, z: cx(25) + 1 };
+const startPos = { x: cx(11), z: cx(10) }; // you wake up in the motel garage
 
 // viewmodel
 const vm = new THREE.Group(); vmScene.add(vm); const arms = makeArms(); vm.add(arms.group); let vmGun = null;
@@ -581,7 +582,7 @@ function update(dt) {
   if (P.hp < P.maxHp * 0.35) { P.heartT -= dt; if (P.heartT <= 0) { sfx.heartbeat(); P.heartT = 0.9; } }
   // flow field
   G.flowT -= dt; const pk = idx(clamp(tileOf(P.x), 0, GW - 1), clamp(tileOf(P.z), 0, GH - 1));
-  if (G.flowDirty || (pk !== G.lastFlowK && G.flowT <= 0)) { flow(tileOf(P.x), tileOf(P.z)); G.lastFlowK = pk; G.flowT = 0.25; G.flowDirty = false; for (const z of zombies) { z.best = 1e9; } }
+  if (G.flowDirty || (pk !== G.lastFlowK && G.flowT <= 0)) { flow([[tileOf(P.x), tileOf(P.z)]]); G.lastFlowK = pk; G.flowT = 0.25; G.flowDirty = false; for (const z of zombies) { z.best = 1e9; } }
   for (let i = zombies.length - 1; i >= 0; i--) { const z = zombies[i]; if (z) updZombie(z, dt, P.x, P.z); }
   separate();
   if (G.state !== 'play') return;
@@ -629,6 +630,9 @@ function render(dt) {
   vm.rotation.set(rl * 0.6 + P.recoil * 0.08 * (1 - ads * 0.85) + (P.sprinting ? -0.35 : 0), (P.sprinting ? 0.6 : 0) + kn * 0.8, rl * 0.4);
   if (muzzleT > 0) { muzzleT -= dt; muzzle.visible = !tp; muzzle.position.set(vm.position.x, vm.position.y + (vmGun ? vmGun.muzzle.position.y : 0.06), vm.position.z + (vmGun ? vmGun.muzzle.position.z : -0.55)); } else muzzle.visible = false;
   // shadows follow the player
+  { const far = P.y > 8 ? 260 : 125; if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); } }
+  { // the higher you fly, the thinner the fog and the brighter the moon, so the whole map is visible from the air
+    const air = clamp((P.y - 4) / 30, 0, 1); scene.fog.density = 0.024 * (1 - air * 0.82); WD.hemi.intensity = 1.3 + air * 1.6; renderer.toneMappingExposure = 1.4 + air * 0.6; }
   WD.moonL.position.set(P.x - 30, 60, P.z - 40); WD.moonL.target.position.set(P.x, 0, P.z);
   renderer.clear(); renderer.render(scene, camera);
   if (vm.visible) { renderer.clearDepth(); renderer.render(vmScene, vmCam); }
@@ -724,4 +728,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie };
+window.__ds = { renderer, scene, camera, fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie };

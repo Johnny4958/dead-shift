@@ -1,20 +1,25 @@
 // Builds the Lockwood Motel meshes from the grid, plus props, lights, sky and machine placements.
 import * as THREE from 'three';
 import { T } from './tex.js';
-import { S, GW, GH, WALL_H, OUT, FLOOR, WALL, WIN, DOOR, FENCE, PROP, grid, zone, idx, at, inb, doors, windows, rooms, prop, cx } from './map.js';
+import { S, GW, GH, WALL_H, OUT, FLOOR, WALL, WIN, DOOR, FENCE, PROP, GLASS, OPEN, grid, zone, idx, at, inb, doors, windows, rooms, prop, cx, boxSpotList } from './map.js';
+import { T2 } from './tex2.js';
+import { buildTown } from './town.js';
 import { makeBox, makeCrate, makePerk, makeSwitch, makeForge, makeCar, B, C, bake, merge } from './models.js';
 import { WALLBUYS, W } from './weapons.js';
 
 const std = o => new THREE.MeshStandardMaterial(o);
 const SILL = 0.9, LINTEL = 2.3, DOOR_H = 2.6;
 
-class Bucket { constructor() { this.p = []; this.n = []; this.u = []; }
+// Walls/floors/roofs are split into 32 m cells so the renderer can skip what is off-screen or past the fog.
+class Bucket { constructor() { this.cells = new Map(); }
+  cell(x, z) { const k = Math.floor(x / 32) + ',' + Math.floor(z / 32); let c = this.cells.get(k); if (!c) this.cells.set(k, c = { p: [], n: [], u: [] }); return c; }
   quad(a, b, c, d, n, ua, ub, uc, ud) { // a,b,c,d corners in order; flips winding to face n
     const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
     const cr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
     let v = [a, b, c, a, c, d], uv = [ua, ub, uc, ua, uc, ud];
     if (cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2] < 0) { v = [a, c, b, a, d, c]; uv = [ua, uc, ub, ua, ud, uc]; }
-    for (let i = 0; i < 6; i++) { this.p.push(...v[i]); this.n.push(...n); this.u.push(...uv[i]); }
+    const C = this.cell((a[0] + c[0]) / 2, (a[2] + c[2]) / 2);
+    for (let i = 0; i < 6; i++) { C.p.push(...v[i]); C.n.push(...n); C.u.push(...uv[i]); }
   }
   // vertical rectangle on plane facing n (n is axis-aligned in xz), spanning along-axis from s0..s1 at fixed coord, y0..y1
   wall(axis, fixed, s0, s1, y0, y1, n) {
@@ -23,7 +28,9 @@ class Bucket { constructor() { this.p = []; this.n = []; this.u = []; }
     this.quad(P(s0, y0), P(s1, y0), P(s1, y1), P(s0, y1), n, U(s0, y0), U(s1, y0), U(s1, y1), U(s0, y1));
   }
   flat(x0, z0, x1, z1, y, up, us = 1 / S) { const n = [0, up ? 1 : -1, 0]; this.quad([x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], n, [x0 * us, z0 * us], [x1 * us, z0 * us], [x1 * us, z1 * us], [x0 * us, z1 * us]); }
-  mesh(mat) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(this.u, 2)); g.computeTangents?.call; const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.castShadow = true; return m; }
+  mesh(mat) { const grp = new THREE.Group();
+    for (const c of this.cells.values()) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(c.p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(c.n, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(c.u, 2)); g.computeBoundingSphere(); const m = new THREE.Mesh(g, mat); m.receiveShadow = true; m.castShadow = true; grp.add(m); }
+    return grp; }
 }
 
 // Static batching: props that never move are merged per look-alike material and per 32 m cell,
@@ -61,6 +68,25 @@ function batchStatics(scene, list) {
   return { before, after };
 }
 
+// Any static mesh that spans most of the map (merged trees, weeds, graves, roads...) is cut into 32 m cells by triangle,
+// so only the cells in view get drawn.
+function splitHuge(scene) {
+  const todo = []; scene.traverse(o => { if (o.isMesh && !o.isInstancedMesh && !o.isSkinnedMesh && o.parent === scene && !Array.isArray(o.material)) { const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere(); if (g.boundingSphere.radius > 60 && g.attributes.position.count > 600) todo.push(o); } });
+  let made = 0;
+  for (const o of todo) {
+    o.updateMatrixWorld(true); const g0 = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry; g0.applyMatrix4(o.matrixWorld);
+    const pos = g0.attributes.position, names = Object.keys(g0.attributes), cells = new Map();
+    for (let t = 0; t < pos.count; t += 3) { const x = (pos.getX(t) + pos.getX(t + 1) + pos.getX(t + 2)) / 3, z = (pos.getZ(t) + pos.getZ(t + 1) + pos.getZ(t + 2)) / 3; const k = Math.floor(x / 32) + ',' + Math.floor(z / 32); let c = cells.get(k); if (!c) cells.set(k, c = []); c.push(t); }
+    if (cells.size < 2) continue;
+    for (const tris of cells.values()) {
+      const g = new THREE.BufferGeometry();
+      for (const nm of names) { const A = g0.attributes[nm], is = A.itemSize, out = new A.array.constructor(tris.length * 3 * is); let w = 0; for (const t of tris) for (let v = 0; v < 3; v++) for (let c = 0; c < is; c++) out[w++] = A.array[(t + v) * is + c]; g.setAttribute(nm, new THREE.BufferAttribute(out, is, A.normalized)); }
+      g.computeBoundingSphere(); const m = new THREE.Mesh(g, o.material); m.castShadow = o.castShadow; m.receiveShadow = o.receiveShadow; m.renderOrder = o.renderOrder; scene.add(m); made++;
+    }
+    scene.remove(o);
+  }
+  return { split: todo.length, made };
+}
 export function buildWorld(scene, env, q) {
   const W_ = {}; const add = o => { scene.add(o); return o; }; const STATICS = [];
   const rep = (t, x, y) => { const c = t.clone(); c.needsUpdate = true; c.repeat.set(x, y); return c; };
@@ -80,56 +106,65 @@ export function buildWorld(scene, env, q) {
     rust: std({ map: T.rust(), roughness: 0.85, metalness: 0.2 }),
     dark: std({ color: 0x1a1a1c, roughness: 0.7 }),
     trim: std({ color: 0x3a2a1c, roughness: 0.7 }),
+    siding: std({ map: T2.siding('#8a9590'), roughness: 0.9 }), sidingB: std({ map: T2.siding('#9a8c6e'), roughness: 0.9 }), sidingW: std({ map: T2.siding('#b8b4a6'), roughness: 0.9 }),
+    logs: std({ map: T2.logs(), roughness: 0.95 }), stone: std({ map: T2.stone(), roughness: 0.95 }), barn: std({ map: T2.barn(), roughness: 0.9 }),
+    sheet: std({ map: T2.metal(), roughness: 0.6, metalness: 0.45 }), bunker: std({ map: T2.bunker(), roughness: 0.95 }),
+    mall: std({ map: T2.mallTile(), roughness: 0.5 }), roof: std({ map: T2.roof(), roughness: 1 }), wood2: std({ map: T2.wood2(), roughness: 0.85 }),
+    dirtF: std({ map: T.dirt(), roughness: 1, color: 0x8a7a60 }), mallWall: std({ map: T.panel(), roughness: 0.8, color: 0xc8c0b0 }),
   };
   W_.M = M;
-  const extFor = z => z === 3 ? M.brick : M.stucco;
-  const intFor = z => z === 0 ? M.panel : z === 2 ? M.diner : M.block;
+  const zoneWall = new Map(); for (const r of rooms) if (!zoneWall.has(r.z)) zoneWall.set(r.z, r.wallKind);
+  const sidings = [M.siding, M.sidingB, M.sidingW];
+  const kindMat = (k, z) => ({ stucco: M.stucco, brick: M.brick, siding: sidings[z % 3], wood: M.wood2, metal: M.sheet, stone: M.stone, barn: M.barn, log: M.logs, bunker: M.bunker, mall: M.stucco, concrete: M.block })[k] || M.stucco;
+  const extFor = z => z === 3 ? M.brick : z <= 2 ? M.stucco : kindMat(zoneWall.get(z), z);
+  const intFor = z => z === 0 ? M.panel : z === 2 ? M.diner : z === 3 ? M.block : ({ bunker: M.bunker, mall: M.mallWall, log: M.logs, barn: M.wood2, metal: M.sheet, stone: M.stone, wood: M.wood2 })[zoneWall.get(z)] || M.panel;
   // which building a wall/window/door tile belongs to (nearest floor zone)
-  const bz = (i, j) => { for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const t = at(i + di, j + dj); if (t === FLOOR) return zone[idx(i + di, j + dj)]; } return 0; };
+  const bz = (i, j) => { for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const t = at(i + di, j + dj); if (t === FLOOR || t === OPEN) return zone[idx(i + di, j + dj)]; } return 0; };
 
   // ---- ground ----
   const lotW = GW * S, lotH = GH * S;
-  const asphalt = std({ map: rep(T.asphalt(), lotW / 8, lotH / 8), normalMap: rep(T.asphaltN(), lotW / 4, lotH / 4), normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.82, color: 0x9a9a9a });
-  const ground = add(new THREE.Mesh(new THREE.PlaneGeometry(lotW, lotH), asphalt)); ground.rotation.x = -Math.PI / 2; ground.position.set(lotW / 2, 0, lotH / 2); ground.receiveShadow = true;
-  const outer = add(new THREE.Mesh(new THREE.PlaneGeometry(600, 600), std({ color: 0x15140f, roughness: 1 }))); outer.rotation.x = -Math.PI / 2; outer.position.set(lotW / 2, -0.02, lotH / 2);
-  // parking stripes + dirt
-  const lineM = new THREE.MeshStandardMaterial({ map: T.lines(), transparent: true, depthWrite: false, roughness: 0.8, polygonOffset: true, polygonOffsetFactor: -2 });
-  const lineG = new THREE.PlaneGeometry(0.5, 5); lineG.rotateX(-Math.PI / 2);
-  for (let k = 0; k < 10; k++) { const l = new THREE.Mesh(lineG, lineM); l.position.set(48 + k * 3.2, 0.01, 6.5); add(l); const l2 = l.clone(); l2.position.set(6 + k * 3.2, 0.01, 72); add(l2); }
+  const grassM = std({ map: rep(T2.grass(), lotW / 6, lotH / 6), roughness: 1, color: 0xa8a890 });
+  const ground = add(new THREE.Mesh(new THREE.PlaneGeometry(lotW, lotH), grassM)); ground.rotation.x = -Math.PI / 2; ground.position.set(lotW / 2, 0, lotH / 2); ground.receiveShadow = true;
+  const outer = add(new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400), std({ color: 0x15140f, roughness: 1 }))); outer.rotation.x = -Math.PI / 2; outer.position.set(lotW / 2, -0.02, lotH / 2);
+  W_.asphaltM = std({ map: T.asphalt(), normalMap: T.asphaltN(), normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.82, color: 0x9a9a9a });
   const dirtM = new THREE.MeshStandardMaterial({ map: T.dirt(), transparent: true, depthWrite: false, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1 });
-  for (const [x, z, s] of [[8, 8, 10], [80, 10, 12], [10, 70, 12], [82, 70, 10], [44, 4, 9], [6, 40, 9], [84, 36, 9], [30, 74, 9], [60, 74, 10], [52, 34, 8], [22, 40, 7]]) { const d = add(new THREE.Mesh(new THREE.PlaneGeometry(s, s), dirtM)); d.rotation.x = -Math.PI / 2; d.rotation.z = x; d.position.set(x, 0.012, z); }
+  for (const [x, z, s] of [[8, 8, 10], [80, 10, 12], [44, 4, 9], [6, 40, 9], [84, 36, 9], [30, 74, 9], [52, 34, 8], [22, 40, 7]]) { const d = add(new THREE.Mesh(new THREE.PlaneGeometry(s, s), dirtM)); d.rotation.x = -Math.PI / 2; d.position.set(x, 0.015, z); d.receiveShadow = true; }
 
   // ---- walls, windows, doors, ceilings, floors ----
   const buckets = new Map(); const bk = m => { if (!buckets.has(m)) buckets.set(m, new Bucket()); return buckets.get(m); };
+  const wallish = t => t === WALL || t === WIN || t === DOOR || t === GLASS || t === OPEN;
   for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
     const t = at(i, j); const x0 = i * S, x1 = x0 + S, z0 = j * S, z1 = z0 + S;
-    if (t === FLOOR) { bk(M.ceiling).flat(x0, z0, x1, z1, WALL_H, false); continue; }
-    if (t !== WALL && t !== WIN && t !== DOOR) continue;
-    const z = bz(i, j); const ext = extFor(z), int = intFor(z);
-    bk(M.ceiling).flat(x0, z0, x1, z1, WALL_H, false);
+    if (t === FLOOR || (t === PROP && zone[idx(i, j)] > 3 && rooms.some(r => i >= r.i0 && i <= r.i1 && j >= r.j0 && j <= r.j1)) || (t === PROP && zone[idx(i, j)] >= 0 && zone[idx(i, j)] !== 1 && zone[idx(i, j)] <= 3)) { bk(M.ceiling).flat(x0, z0, x1, z1, WALL_H, false); bk(M.roof).flat(x0, z0, x1, z1, WALL_H + 0.25, true); continue; }
+    if (!wallish(t)) continue;
+    const z = bz(i, j); const ext = extFor(z);
+    bk(M.ceiling).flat(x0, z0, x1, z1, WALL_H, false); bk(M.roof).flat(x0, z0, x1, z1, WALL_H + 0.25, true);
     const sides = [[1, 0, 'z', x1, z0, z1, [1, 0, 0]], [-1, 0, 'z', x0, z0, z1, [-1, 0, 0]], [0, 1, 'x', z1, x0, x1, [0, 0, 1]], [0, -1, 'x', z0, x0, x1, [0, 0, -1]]];
     for (const [di, dj, axis, fixed, s0, s1, n] of sides) {
-      const nt = at(i + di, j + dj);
-      const mat = nt === FLOOR ? intFor(zone[idx(i + di, j + dj)]) : ext;
+      const nt = at(i + di, j + dj); const nk = inb(i + di, j + dj) ? idx(i + di, j + dj) : 0;
+      const inside = nt === FLOOR || (nt === PROP && zone[nk] >= 0 && zone[nk] !== 1 && rooms.some(r => i + di >= r.i0 && i + di <= r.i1 && j + dj >= r.j0 && j + dj <= r.j1));
+      const mat = inside ? intFor(zone[nk]) : ext;
+      // roof edge fascia so the roof slab has thickness
+      if (!wallish(nt) && !inside) bk(M.trim).wall(axis, fixed, s0, s1, WALL_H, WALL_H + 0.25, n);
       if (t === WALL) {
         if (nt === WALL) continue;
-        if (nt === WIN) { bk(ext).wall(axis, fixed, s0, s1, SILL, LINTEL, n); continue; }
-        if (nt === DOOR) { bk(ext).wall(axis, fixed, s0, s1, 0, DOOR_H, n); continue; }
+        if (nt === WIN || nt === GLASS) { bk(ext).wall(axis, fixed, s0, s1, SILL, LINTEL, n); continue; }
+        if (nt === DOOR || nt === OPEN) { bk(ext).wall(axis, fixed, s0, s1, 0, DOOR_H, n); continue; }
         bk(mat).wall(axis, fixed, s0, s1, 0, WALL_H, n);
-      } else if (nt === FLOOR || nt === OUT || nt === PROP) {
-        const y0 = t === WIN ? LINTEL : DOOR_H; bk(mat).wall(axis, fixed, s0, s1, y0, WALL_H, n);
-        if (t === WIN) bk(mat).wall(axis, fixed, s0, s1, 0, SILL, n);
+      } else if (!wallish(nt)) {
+        const y0 = (t === WIN || t === GLASS) ? LINTEL : DOOR_H; bk(mat).wall(axis, fixed, s0, s1, y0, WALL_H, n);
+        if (t === WIN || t === GLASS) bk(mat).wall(axis, fixed, s0, s1, 0, SILL, n);
       }
     }
-    if (t === WIN) { bk(M.wood).flat(x0, z0, x1, z1, SILL, true); bk(ext).flat(x0, z0, x1, z1, LINTEL, false); }
-    if (t === DOOR) bk(ext).flat(x0, z0, x1, z1, DOOR_H, false);
+    if (t === WIN || t === GLASS) { bk(M.wood).flat(x0, z0, x1, z1, SILL, true); bk(ext).flat(x0, z0, x1, z1, LINTEL, false); }
+    if (t === DOOR || t === OPEN) bk(ext).flat(x0, z0, x1, z1, DOOR_H, false);
   }
   for (const r of rooms) {
-    const m = r.floorKind === 'carpet' ? M.carpet : r.floorKind === 'checker' ? M.checker : M.concrete;
-    const b = bk(m); b.flat(r.i0 * S, r.j0 * S, (r.i1 + 1) * S, (r.j1 + 1) * S, 0.01, true, r.floorKind === 'checker' ? 1 / 4 : 1 / 3);
+    const fk = r.floorKind; const m = fk === 'carpet' ? M.carpet : fk === 'checker' ? M.checker : fk === 'wood' ? M.wood : fk === 'mall' || fk === 'shop' ? M.mall : fk === 'stone' ? M.stone : fk === 'dirt' ? M.dirtF : M.concrete;
+    const b = bk(m); b.flat(r.i0 * S, r.j0 * S, (r.i1 + 1) * S, (r.j1 + 1) * S, 0.01, true, fk === 'checker' ? 1 / 4 : fk === 'mall' || fk === 'shop' ? 1 / 4 : 1 / 3);
   }
   // door and window floor strips
-  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const t = at(i, j); if (t === DOOR) bk(M.concrete).flat(i * S, j * S, i * S + S, j * S + S, 0.012, true); }
+  for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const t = at(i, j); if (t === DOOR || t === OPEN || t === WIN || t === GLASS) bk(M.concrete).flat(i * S, j * S, i * S + S, j * S + S, 0.012, true); }
   for (const [m, b] of buckets) { const mesh = b.mesh(m); add(mesh); }
 
   // window frames + planks
@@ -166,23 +201,14 @@ export function buildWorld(scene, env, q) {
     W_.doorMeshes[d.id] = g;
   }
 
-  // ---- fence + treeline ----
-  const chain = std({ map: rep(T.chain(), lotW / 2.6, 1), alphaTest: 0.5, side: THREE.DoubleSide, metalness: 0.6, roughness: 0.5, color: 0x9aa0a0 });
-  const fenceParts = [];
-  const fh = 2.8;
-  const fenceSide = (x0, z0, x1, z1) => { const len = Math.hypot(x1 - x0, z1 - z0); const m = new THREE.Mesh(new THREE.PlaneGeometry(len, fh), chain); m.position.set((x0 + x1) / 2, fh / 2, (z0 + z1) / 2); m.rotation.y = -Math.atan2(z1 - z0, x1 - x0); m.material.map.repeat.set(len / 2.6, 1); add(m); for (let s = 0; s <= len; s += 4) { const t = s / len; fenceParts.push(bake(C(0.05, 0.05, fh + 0.1, 6), { x: x0 + (x1 - x0) * t, z: z0 + (z1 - z0) * t, y: fh / 2, c: 0x777b7c })); } fenceParts.push(bake(C(0.03, 0.03, len, 6), { x: (x0 + x1) / 2, z: (z0 + z1) / 2, y: fh, rz: Math.PI / 2, ry: -Math.atan2(z1 - z0, x1 - x0), c: 0x777b7c })); };
-  const e = S;
-  fenceSide(e, e, lotW - e, e); fenceSide(lotW - e, e, lotW - e, lotH - e); fenceSide(lotW - e, lotH - e, e, lotH - e); fenceSide(e, lotH - e, e, e);
-  add(new THREE.Mesh(merge(fenceParts), std({ vertexColors: true, metalness: 0.7, roughness: 0.45 })));
-  const treeParts = [], trunkParts = []; let seed = 7; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  for (let n = 0; n < 220; n++) { const a = r() * Math.PI * 2, d = 62 + r() * 70; const x = lotW / 2 + Math.cos(a) * d * 1.05, z = lotH / 2 + Math.sin(a) * d; const h = 8 + r() * 10; treeParts.push(bake(new THREE.ConeGeometry(2 + r() * 1.6, h, 7), { x, y: h / 2 + 1.5, z, c: new THREE.Color().setHSL(0.3, 0.25, 0.08 + r() * 0.05).getHex() })); trunkParts.push(bake(C(0.25, 0.35, 3, 5), { x, y: 1.5, z, c: 0x2a1d12 })); }
-  add(new THREE.Mesh(merge(treeParts), std({ vertexColors: true, roughness: 1 }))); add(new THREE.Mesh(merge(trunkParts), std({ vertexColors: true, roughness: 1 })));
+  let seed = 7; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  buildTown(scene, W_, M, add, q);
 
   // ---- sky ----
-  const sky = add(new THREE.Mesh(new THREE.SphereGeometry(420, 24, 16), new THREE.MeshBasicMaterial({ map: T.sky(), side: THREE.BackSide, fog: false, depthWrite: false }))); sky.position.set(lotW / 2, 0, lotH / 2); sky.renderOrder = -1;
-  const starG = new THREE.BufferGeometry(); const sp = []; for (let n = 0; n < 900; n++) { const a = r() * Math.PI * 2, el = 0.08 + r() * 1.4; sp.push(Math.cos(a) * Math.cos(el) * 400 + lotW / 2, Math.sin(el) * 400, Math.sin(a) * Math.cos(el) * 400 + lotH / 2); } starG.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+  const sky = add(new THREE.Mesh(new THREE.SphereGeometry(700, 24, 16), new THREE.MeshBasicMaterial({ map: T.sky(), side: THREE.BackSide, fog: false, depthWrite: false }))); sky.position.set(lotW / 2, 0, lotH / 2); sky.renderOrder = -1;
+  const starG = new THREE.BufferGeometry(); const sp = []; for (let n = 0; n < 900; n++) { const a = r() * Math.PI * 2, el = 0.08 + r() * 1.4; sp.push(Math.cos(a) * Math.cos(el) * 650 + lotW / 2, Math.sin(el) * 650, Math.sin(a) * Math.cos(el) * 650 + lotH / 2); } starG.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
   add(new THREE.Points(starG, new THREE.PointsMaterial({ color: 0xc8d0ff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8, depthWrite: false })));
-  const moon = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: T.moon(), fog: false, depthWrite: false, transparent: true }))); moon.scale.set(60, 60, 1); moon.position.set(lotW / 2 - 180, 210, lotH / 2 - 260);
+  const moon = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: T.moon(), fog: false, depthWrite: false, transparent: true }))); moon.scale.set(90, 90, 1); moon.position.set(lotW / 2 - 280, 330, lotH / 2 - 400);
 
   // ---- props ----
   const glowMat = (c, o = 0.9) => new THREE.SpriteMaterial({ map: T.glow(), color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -245,10 +271,7 @@ export function buildWorld(scene, env, q) {
   // ---- interactable machines ----
   // facing: direction the front of the machine points (toward the player)
   const place = (obj, i, j, face, inset = 0.45) => { const x = cx(i) - face[0] * inset, z = cx(j) - face[1] * inset; obj.position.set(x, 0, z); obj.rotation.y = Math.atan2(face[0], face[1]); add(obj); return { x: cx(i) + face[0] * 0.6, z: cx(j) + face[1] * 0.6 }; };
-  W_.boxSpots = [
-    { i: 21, j: 29, face: [0, -1], name: 'Lobby' }, { i: 36, j: 22, face: [0, 1], name: 'Diner' },
-    { i: 12, j: 6, face: [0, 1], name: 'Garage' }, { i: 37, j: 14, face: [-1, 0], name: 'Parking Lot' },
-  ];
+  W_.boxSpots = boxSpotList.map(o => ({ ...o }));
   W_.box = makeBox(); add(W_.box.group);
   for (const s of W_.boxSpots) { prop(s.i, s.j); s.crate = makeCrate(); s.use = place(s.crate, s.i, s.j, s.face, 0.2); s.pos = { x: cx(s.i) - s.face[0] * 0.2, z: cx(s.j) - s.face[1] * 0.2 }; s.rot = Math.atan2(s.face[0], s.face[1]); }
   W_.perks = [
@@ -269,8 +292,6 @@ export function buildWorld(scene, env, q) {
     return { ...wb, mesh: m, use: { x: cx(wb.i) + wb.face[0] * 1.6, z: cx(wb.j) + wb.face[1] * 1.6 } };
   });
 
-  // ---- the car ----
-  W_.car = makeCar(env); add(W_.car.group);
 
   // ---- lights ----
   W_.hemi = add(new THREE.HemisphereLight(0x4a5a80, 0x1a1410, 0.55));
@@ -288,8 +309,10 @@ export function buildWorld(scene, env, q) {
   for (const [x, z] of [[43, 51], [36, 47], [50, 55], [66, 52], [60, 50], [72, 56], [22, 20], [14, 16], [28, 24]]) { const f = meshAt(B(1.4, 0.06, 0.3), fixM, x, WALL_H - 0.04, z); f.castShadow = false; }
   W_.fires.forEach((f, i) => W_.lightSrc.push({ col: 0xff7a30, base: 10, dist: 13, decay: 1.7, x: f.x, y: 1.6, z: f.z, kind: 'fire', i }));
   W_.lightPool = [0, 1, 2].map(() => { const l = new THREE.PointLight(0xffffff, 0, 16, 1.6); l.position.set(0, -50, 0); add(l); return { light: l, src: null, w: 0 }; });
+  W_.car = makeCar(env); add(W_.car.group);
   W_.carLight = new THREE.SpotLight(0xfff0d0, 0, 30, 0.55, 0.5, 1.2); add(W_.carLight); add(W_.carLight.target);
   W_.batched = batchStatics(scene, STATICS);
+  W_.split = splitHuge(scene);
   return W_;
 }
 
