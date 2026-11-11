@@ -43,5 +43,16 @@ https://johnny4958.github.io/dead-shift/ . Local servers: 8112 = dist (new), 811
 - tests/vehlook.py screenshots to /home/sprite/perf/vlook (geometry checked by bounding boxes; not eyeballed).
 - perfcmp (844x390): garage same 229 calls; chop shop/police 124->152 calls, 71k->80k tris; Main St 279->308 calls, 94k->99k tris.
 
+## Stage 4: base and survivors (DONE, published)
+- src/base.js: baseGeo(kind) for gen/lamp/bulbs/bench/trap/mine/camp (baked + merged, 2 draws each), makeSurvivor(look) (soldier rig
+  recoloured), TRADERS (Dale ~150,78 by the chop shop; Marisol 1316,84 truck stop; Pastor Hale 1638,25 by Ashford church), WARES, RECIPES.
+- main.js "Stage 2" block (search "Stage 2: base gear"): PIECES gained gen 1500, lamp 400, bench 1000, trap/mine (from inventory, cost 0).
+  placeBase/repower (POWER_R 16 m: floodlights light up and benches work only near a generator), floodlights add a lightSrc,
+  zTraps (trap holds 4 s, 1.5 s for bosses, 3 uses; mine = blast()), traders set up lazily within 140 m (campSpot finds open ground),
+  shop panel reuses #upgPanel (openShop/renderShop/shopBuy). Scrap: 1 per kill, 15 per boss; G.scrap and G.inv reset on new game.
+  Admin extra row: +20 SCRAP, TRAPS, MINES. Build bar wraps; on touch landscape it sits at the bottom and the ammo box hides while building.
+- tests/base.py WxH: places gen/lamp/bench with taps, power range, craft, trap holds, mine kills, trade with Dale, all 3 camps appear.
+- Perf (844x390): 10-piece base +19 calls/+4% tris at night; Dale's camp +24 calls/+3.6k tris when in view; perfcmp spots unchanged.
+
 Stages 4 (generators, crafting table, traps/mines, traders) and 5 (intro, journals, hallucinations, hordes, drone, helicopter,
 roller coaster, co-op) not started.

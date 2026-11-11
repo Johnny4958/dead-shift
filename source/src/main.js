@@ -9,6 +9,7 @@ import { S, GW, GH, surf, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone
 import { genChunk, initProc, roadAt, furnishFixed } from './proc.js';
 import { initStream, updateStream, readsNear, live as liveChunks, stats as streamStats } from './stream.js';
 import { pushOut } from './props.js';
+import { baseGeo, makeSurvivor, TRADERS, WARES, RECIPES } from './base.js';
 import { makeZombie, animZombie, warmZombies, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo, wallGeo } from './models.js';
 import { T, setAniso } from './tex.js';
 import { T2 } from './tex2.js';
@@ -153,7 +154,7 @@ function updHud() {
   if (shownPts !== G.points) { $('pts').textContent = G.points; shownPts = G.points; }
   const g = P.guns[P.cur];
   if (g) { $('gunName').textContent = g.name; $('gunName').className = g.pap ? 'pap' : ''; $('clip').innerHTML = g.clip + '<small> / ' + g.reserve + '</small>'; $('clip').className = g.clip <= g.mag * 0.25 ? 'low' : ''; }
-  $('nades').textContent = 'Grenades: ' + P.nades;
+  $('nades').textContent = 'Grenades: ' + P.nades + '   Scrap: ' + G.scrap;
   $('perks').innerHTML = [...P.perks].map(k => { const p = WD.perks.find(q => q.key === k); return `<b style="background:${p.col};color:${p.col}"><span style="color:#fff">${p.name[0]}</span></b>`; }).join('');
   $('powerups').innerHTML = (G.insta > 0 ? `<div class="${G.insta < 5 ? 'blink' : ''}">INSTA-KILL<br>${Math.ceil(G.insta)}</div>` : '') + (G.dbl > 0 ? `<div class="${G.dbl < 5 ? 'blink' : ''}">DOUBLE POINTS<br>${Math.ceil(G.dbl)}</div>` : '');
   const left = G.toSpawn + zombies.filter(z => !z.dead).length; $('zleft').textContent = G.between ? 'Next round soon' : 'Zombies left: ' + left;
@@ -174,6 +175,7 @@ function drawMinimap() {
   mm.clearRect(0, 0, w, w); mm.save(); mm.translate(w / 2, w / 2); mm.rotate(yaw); mm.imageSmoothingEnabled = false; mm.drawImage(mapImg, (mapO[0] * S - px) * PPM, (mapO[1] * S - pz) * PPM, GW * S * PPM, GH * S * PPM);
   for (const z of zombies) if (!z.dead) { const on = z.ai === 'hunt' || z.ai === 'go'; mm.fillStyle = on ? '#ff3030' : '#8a5050'; mm.beginPath(); mm.arc((z.x - px) * PPM, (z.z - pz) * PPM, on ? 4 : 3, 0, 7); mm.fill(); }
   mm.fillStyle = '#5ab0ff'; const b = WD.boxSpots[box.spot].pos; mm.fillRect((b.x - px) * PPM - 5, (b.z - pz) * PPM - 5, 10, 10);
+  mm.fillStyle = '#50e070'; for (const t of traders) if (t.ready) { mm.beginPath(); mm.arc((t.x - px) * PPM, (t.z - pz) * PPM, 5, 0, 7); mm.fill(); }
   for (const v of cars) { mm.fillStyle = v === car ? '#ffd040' : '#c8a040'; mm.fillRect((v.x - px) * PPM - 4, (v.z - pz) * PPM - 7, 8, 14); }
   mm.restore(); mm.fillStyle = '#fff'; mm.beginPath(); mm.moveTo(w / 2, w / 2 - 10); mm.lineTo(w / 2 - 7, w / 2 + 8); mm.lineTo(w / 2 + 7, w / 2 + 8); mm.fill();
 }
@@ -194,7 +196,11 @@ const vehStart = { mustang: carStart, pickup: openSpot([[75, 21, Math.PI / 2], [
   cruiser: openSpot([[56, 18, 0], [59, 18, 0], [53, 18, 0], [56, 21, Math.PI / 2], [50, 20, 0]]) || { x: carStart.x - 8, z: carStart.z, h: 0 } };
 const forge = { t: 0 };
 const BM = buildMats();
-const PIECES = [{ kind: 'wall', name: 'Wall', cost: 250, hp: 900, tile: BWALL }, { kind: 'door', name: 'Door', cost: 400, hp: 700, tile: BDOOR }, { kind: 'spikes', name: 'Spikes', cost: 300, hp: 1600, tile: SPIKE }];
+const PIECES = [{ kind: 'wall', name: 'Wall', cost: 250, hp: 900, tile: BWALL }, { kind: 'door', name: 'Door', cost: 400, hp: 700, tile: BDOOR }, { kind: 'spikes', name: 'Spikes', cost: 300, hp: 1600, tile: SPIKE },
+  { kind: 'gen', name: 'Generator', cost: 1500, hp: 1, tile: WALL, base: true }, { kind: 'lamp', name: 'Floodlight', cost: 400, hp: 1, tile: null, base: true },
+  { kind: 'bench', name: 'Workbench', cost: 1000, hp: 1, tile: WALL, base: true }, { kind: 'trap', name: 'Bear trap', cost: 0, inv: 'trap', hp: 1, tile: null, base: true },
+  { kind: 'mine', name: 'Landmine', cost: 0, inv: 'mine', hp: 1, tile: null, base: true }];
+const POWER_R = 16; // a generator powers floodlights and workbenches this many metres away
 const build = { on: false, sel: 0, rot: 0, ghost: null, gi: -1, gj: -1, ok: false };
 
 // ---------------- reset / start ----------------
@@ -216,7 +222,7 @@ function clearAll() {
   for (const p of pups) scene.remove(p.g); pups.length = 0;
   for (const g of gases) scene.remove(g.sp); gases.length = 0;
   for (const n of nades) scene.remove(n.m); nades.length = 0;
-  for (const p of pieces) { scene.remove(p.g); if (inb(p.i, p.j)) { grid[idx(p.i, p.j)] = p.under; owner[idx(p.i, p.j)] = -1; } } pieces.length = 0;
+  for (const p of pieces) { scene.remove(p.g); if (p.tile != null && inb(p.i, p.j)) { grid[idx(p.i, p.j)] = p.under; owner[idx(p.i, p.j)] = -1; } } pieces.length = 0; clearBase();
 }
 function newGame() {
   clearAll();
@@ -226,7 +232,7 @@ function newGame() {
   recenter(startPos.x, startPos.z, true);
   for (const d of doors) WD.doorMeshes[d.id].visible = true;
   for (const w of windows) { w.planks = 6; WD.planks[w.id].list.forEach(p => p.visible = true); }
-  Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0, god: false });
+  Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0, god: false, scrap: 0, inv: { trap: 0, mine: 0 } });
   Object.assign(P, { x: startPos.x, z: startPos.z, y: 0, vy: 0, yaw: Math.PI, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, view: 'fp', ads: 0, driving: false, bleedT: 0, stepN: 0 });
   blood.length = 0; bloodMesh.count = 0; stealthShown = -1; SKY.newGame(); clockT = 0;
   P.perks.clear(); P.guns = [makeGun('pistol')]; setVmGun();
@@ -379,6 +385,7 @@ function updZombie(z, dt, tx, tz) {
   }
   let speed = z.speed * aiMul * (z.rage > 0 ? 1.35 : 1); const onT = grid[k];
   if (onT === WIN) speed *= 0.45;
+  if (baseTraps.length && zTraps(z, dt)) { if (z.dead) return; speed = 0; }
   if (onT === SPIKE) { speed *= 0.5; const p = pieces.find(q => q.k === k); z.hp -= 160 * dt * Math.max(1, G.round / 6); if (p) { p.hp -= 12 * dt; if (p.hp <= 0) removePiece(p); } if (R() < dt * 2) sfx.spike(); if (z.hp <= 0) { killZombie(z, 'spike'); return; } }
   let mvx = gx - z.x, mvz = gz - z.z; const ml = Math.hypot(mvx, mvz);
   let attacking = false;
@@ -424,6 +431,7 @@ function killZombie(z, how, head) {
   z.dead = true; z.deadT = 0; z.fallDir = R() < 0.5 ? 1 : -1;
   { const dead = zombies.filter(q => q.dead && q !== z && q.deadT < CORPSE_T); if (dead.length >= MAX_CORPSES) { dead.sort((a, b) => b.deadT - a.deadT); for (let n = 0; n <= dead.length - MAX_CORPSES; n++) dead[n].deadT = CORPSE_T; } } G.kills++; if (head) G.heads++;
   addPts(z.type === 'boss' ? 1500 : how === 'knife' ? 130 : head ? 100 : how === 'nuke' ? 0 : 60); hitMark(true); sfx.kill(); if (how !== 'nuke' || R() < 0.2) sfx.zdeath(z.type, Math.hypot(z.x - P.x, z.z - P.z), zPan(z.x - P.x, z.z - P.z));
+  if (how !== 'nuke') G.scrap += z.type === 'boss' ? 15 : 1;
   if (z.type === 'boss') { addTrophy(); dropPup(z.x, z.z, 'max'); }
   spriteFx(T.blood(), 0xffffff, z.x, 1.1, z.z, 0.9, 0.5, { grow: 1.5 });
   if (z.type === 'toxic') { sfx.toxic(); const sp = spriteFx(T.puff(), 0x60ff40, z.x, 1, z.z, 3.5, 6, { op: 0.55, grow: 0.4 }); gases.push({ x: z.x, z: z.z, t: 6 }); }
@@ -551,9 +559,12 @@ function throwNade() {
 }
 function updNades(dt) {
   for (let i = nades.length - 1; i >= 0; i--) { const n = nades[i]; n.t -= dt; n.vy -= 18 * dt; const nx = n.x + n.vx * dt, nz = n.z + n.vz * dt; const tt = at(tileOf(nx), tileOf(nz)); if (solidPlayer(tt) || tt === WIN) { n.vx *= -0.4; n.vz *= -0.4; } else { n.x = nx; n.z = nz; } n.y += n.vy * dt; if (n.y < 0.08) { n.y = 0.08; n.vy *= -0.35; n.vx *= 0.7; n.vz *= 0.7; } n.m.position.set(n.x, n.y, n.z);
-    if (n.t <= 0) { scene.remove(n.m); nades.splice(i, 1); sfx.boom(); noise(n.x, n.z, 70); rumble(1, 1, 300); spriteFx(T.glow(), 0xffa040, n.x, 1, n.z, 3, 0.4, { add: true, grow: 10 }); spriteFx(T.puff(), 0x505050, n.x, 1.2, n.z, 2, 1.6, { grow: 3, vy: 0.8, op: 0.8 });
-      for (const z of zombies) { if (z.dead) continue; const d = Math.hypot(z.x - n.x, z.z - n.z); if (d < 5.5) damageZombie(z, (900 + G.round * 120) * (1 - d / 6), false, 'nade'); }
-      const pd = Math.hypot(P.x - n.x, P.z - n.z); if (pd < 3.5 && !P.driving) hurt(25 * (1 - pd / 3.5)); } }
+    if (n.t <= 0) { scene.remove(n.m); nades.splice(i, 1); blast(n.x, n.z, 900 + G.round * 120, 'nade'); } }
+}
+function blast(x, z, dmg, how) {
+  sfx.boom(); noise(x, z, 70); rumble(1, 1, 300); spriteFx(T.glow(), 0xffa040, x, 1, z, 3, 0.4, { add: true, grow: 10 }); spriteFx(T.puff(), 0x505050, x, 1.2, z, 2, 1.6, { grow: 3, vy: 0.8, op: 0.8 });
+  for (const q of zombies) { if (q.dead) continue; const d = Math.hypot(q.x - x, q.z - z); if (d < 5.5) damageZombie(q, dmg * (1 - d / 6), false, how); }
+  const pd = Math.hypot(P.x - x, P.z - z); if (pd < 3.5 && !P.driving) hurt(25 * (1 - pd / 3.5));
 }
 
 // ---------------- interactions ----------------
@@ -588,6 +599,7 @@ function interact(dt) {
     else if (box.state === 'ready') { txt = K() + ' Take ' + W[box.key].name; if (use) { giveGun(box.key); closeBox(); } }
     else txt = '';
   } }
+  if (!txt) txt = baseUse(use);
   if (!txt) { const v = nearVeh(3.4); if (v) { txt = K() + ' Drive the ' + v.spec.name.toLowerCase(); if (use) { car = v; enterCar(); } } }
   if (!txt && !P.driving && Math.hypot(P.x - special.pad.x, P.z - special.pad.z) < 3.5) { const v = nearVeh(9); txt = v ? K() + ' Upgrade the ' + v.spec.name.toLowerCase() : 'Park a car on the UPGRADES pad to upgrade it'; if (use && v) openUpg(v); }
   if (!txt) txt = readables(use);
@@ -609,12 +621,12 @@ function updBox(dt) {
 
 // ---------------- building ----------------
 function toggleBuild() { build.on = !build.on; document.body.classList.toggle('building', build.on); $('buildbar').classList.toggle('hidden', !build.on); if (!build.on) { if (build.ghost) build.ghost.visible = false; if (build.ring) build.ring.visible = false; } drawBuildbar(); if (build.on) toast('Build mode: ' + (inp.device === 'touch' ? 'tap a piece below, aim at the ground, then tap PLACE' : inp.device === 'pad' ? 'Triangle changes piece, R2 places, Square rotates' : 'click a piece or press 1-3 / Q to choose, click to place, T rotates') ); }
-function drawBuildbar() { const pc = PIECES; $('buildbar').innerHTML = pc.map((p, i) => `<div data-bi="${i}" class="${i === build.sel ? 'sel' : ''}${G.points < p.cost ? ' poor' : ''}"><b>${i + 1}</b> ${p.name}<span>${p.cost} pts</span></div>`).join(''); build.barPts = G.points < pc[0].cost ? 0 : G.points; }
+function drawBuildbar() { const pc = PIECES; $('buildbar').innerHTML = pc.map((p, i) => `<div data-bi="${i}" class="${i === build.sel ? 'sel' : ''}${G.points < p.cost || (p.inv && !G.inv[p.inv]) ? ' poor' : ''}"><b>${i + 1}</b> ${p.name}<span>${p.inv ? 'have ' + (G.inv[p.inv] || 0) : p.cost + ' pts'}</span></div>`).join(''); build.barPts = G.points < pc[0].cost ? 0 : G.points; }
 function selectPiece(i) { if (i === build.sel || i < 0 || i >= PIECES.length) return; build.sel = i; drawBuildbar(); if (build.ghost) { scene.remove(build.ghost); build.ghost = null; } sfx.click?.(); toast(PIECES[i].name + ' selected'); }
 document.getElementById('buildbar')?.addEventListener('click', e => { const el = e.target.closest('[data-bi]'); if (el) { inp.buildSel = +el.dataset.bi; e.stopPropagation(); } });
 const ghostMat = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.42, depthWrite: false });
 const ringMat = new THREE.MeshBasicMaterial({ color: 0x40ff60, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
-function makeGhost(kind) { const g = new THREE.Group(); const geo = pieceGeo(kind); g.add(new THREE.Mesh(geo.wood, ghostMat)); if (geo.metal) g.add(new THREE.Mesh(geo.metal, ghostMat)); if (kind === 'door') { const gm = new THREE.Mesh(pieceGeo('gate').wood, ghostMat); gm.position.x = -0.88; g.add(gm); } g.traverse(o => { o.renderOrder = 2; }); return g; }
+function makeGhost(kind) { const g = new THREE.Group(); const geo = PIECES.find(q => q.kind === kind)?.base ? baseGeo(kind) : pieceGeo(kind); if (!geo.wood) geo.wood = geo.metal; g.add(new THREE.Mesh(geo.wood, ghostMat)); if (geo.metal) g.add(new THREE.Mesh(geo.metal, ghostMat)); if (kind === 'door') { const gm = new THREE.Mesh(pieceGeo('gate').wood, ghostMat); gm.position.x = -0.88; g.add(gm); } g.traverse(o => { o.renderOrder = 2; }); return g; }
 // ---- snapping: pieces sit on the 2 m grid; walls grow an arm toward every joined neighbour so runs and corners meet flush
 const ADJ = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const viewAxis = () => Math.abs(Math.sin(P.yaw)) > Math.abs(Math.cos(P.yaw)) ? 1 : 0; // a lone piece faces you
@@ -635,7 +647,7 @@ function pieceAxis(kind, i, j, defAxis) {
   let J; if (kind === 'spikes') { J = []; for (let d = 0; d < 4; d++) if (at(i + ADJ[d][0], j + ADJ[d][1]) === SPIKE) J.push(d); } else J = joins(i, j);
   const x = J.some(d => d < 2), z = J.some(d => d >= 2); return x && !z ? 0 : z && !x ? 1 : defAxis;
 }
-function shapeOf(kind, i, j, defAxis) { return kind === 'wall' ? { key: 'w' + wallKey(i, j, defAxis), geo: wallGeo(wallKey(i, j, defAxis)), ry: 0 } : { key: kind + pieceAxis(kind, i, j, defAxis), geo: null, ry: pieceAxis(kind, i, j, defAxis) ? Math.PI / 2 : 0 }; }
+function shapeOf(kind, i, j, defAxis) { if (PIECES.find(q => q.kind === kind)?.base) return { key: kind + defAxis, geo: null, ry: defAxis ? Math.PI / 2 : 0 }; return kind === 'wall' ? { key: 'w' + wallKey(i, j, defAxis), geo: wallGeo(wallKey(i, j, defAxis)), ry: 0 } : { key: kind + pieceAxis(kind, i, j, defAxis), geo: null, ry: pieceAxis(kind, i, j, defAxis) ? Math.PI / 2 : 0 }; }
 function refreshPieceAt(i, j) {
   const p = pieces.find(q => q.i === i && q.j === j); if (!p) return;
   const sh = shapeOf(p.kind, i, j, p.defAxis); if (sh.key === p.shape) return; p.shape = sh.key;
@@ -654,6 +666,8 @@ function buildReason(pc, gi, gj) {
   if (!inb(gi, gj)) return 'Too far out';
   const t = grid[idx(gi, gj)];
   if (tileOf(P.x) === gi && tileOf(P.z) === gj) return 'You are standing there - step back';
+  if (pc.inv && !G.inv[pc.inv]) return 'You have no ' + pc.name.toLowerCase() + 's - make one at a workbench or buy one from a survivor';
+  if (pieces.some(p => p.i === gi && p.j === gj)) return 'Already built here';
   if (t !== OUT && t !== FLOOR) return t === BWALL || t === BDOOR || t === SPIKE ? 'Already built here' : 'Something is in the way';
   if (zombies.some(z => !z.dead && tileOf(z.x) === gi && tileOf(z.z) === gj)) return 'A zombie is in the way';
   for (const v of cars) if (Math.abs(cx(gi) - v.x) < 2.6 && Math.abs(cx(gj) - v.z) < 2.6) return 'The car is in the way';
@@ -667,7 +681,7 @@ function updBuild() {
   for (let n = 0; n < PIECES.length; n++) if (took('slot' + (n + 1))) selectPiece(n);
   if (inp.buildSel != null) { selectPiece(inp.buildSel); inp.buildSel = null; }
   if (took('rotate')) { build.rot ^= 1; }
-  if ((build.barPts === 0) !== (G.points < PIECES[0].cost) || G.points !== build.lastPts) { build.lastPts = G.points; drawBuildbar(); }
+  if ((build.barPts === 0) !== (G.points < PIECES[0].cost) || G.points !== build.lastPts || build.lastInv !== G.inv.trap * 100 + G.inv.mine) { build.lastPts = G.points; build.lastInv = G.inv.trap * 100 + G.inv.mine; drawBuildbar(); }
   const pc = PIECES[build.sel];
   if (!build.ring) { const r = new THREE.Mesh(new THREE.RingGeometry(1.25, 1.42, 4, 1), ringMat); r.rotation.x = -Math.PI / 2; r.geometry.rotateZ(Math.PI / 4); r.renderOrder = 2; scene.add(r); build.ring = r; }
   const fx_ = -Math.sin(P.yaw), fz = -Math.cos(P.yaw); const gi = tileOf(P.x + fx_ * 2.4), gj = tileOf(P.z + fz * 2.4);
@@ -678,12 +692,13 @@ function updBuild() {
   build.ring.visible = true; build.ring.position.set(cx(gi), 0.04, cx(gj));
   const flash = build.flashT > 0; build.flashT = Math.max(0, (build.flashT || 0) - 1 / 60);
   const col = good ? 0x40ff60 : 0xff4030; ghostMat.color.set(col); ringMat.color.set(col); ghostMat.opacity = flash ? 0.75 : 0.42 + Math.sin(performance.now() / 180) * 0.08;
-  build.promptTxt = (good ? pc.name + ' - ' + pc.cost + ' pts - ' + (inp.device === 'touch' ? 'tap PLACE' : inp.device === 'pad' ? 'R2 to place' : 'click to place') : pc.name + ': ' + why);
+  build.promptTxt = (good ? pc.name + ' - ' + (pc.inv ? (G.inv[pc.inv] || 0) + ' left' : pc.cost + ' pts') + ' - ' + (inp.device === 'touch' ? 'tap PLACE' : inp.device === 'pad' ? 'R2 to place' : 'click to place') : pc.name + ': ' + why);
   const want = took('place') || (inp.fire && !P.semi);
   if (inp.fire) P.semi = true;
-  if (want) { if (why) { sfx.deny(); build.flashT = 0.4; toast("Can't place: " + why); } else if (buy(pc.cost)) { placePiece(pc, gi, gj, defAxis); drawBuildbar(); build.ghostKey = null; } }
+  if (want) { if (why) { sfx.deny(); build.flashT = 0.4; toast("Can't place: " + why); } else if (pc.inv ? (G.inv[pc.inv]--, sfx.build(), true) : buy(pc.cost)) { placePiece(pc, gi, gj, defAxis); drawBuildbar(); build.ghostKey = null; } }
 }
 function placePiece(pc, i, j, defAxis) {
+  if (pc.base) return placeBase(pc, i, j, defAxis);
   const k = idx(i, j); const g = new THREE.Group(); const geo = pc.kind === 'wall' ? wallGeo(wallKey(i, j, defAxis)) : pieceGeo(pc.kind);
   const w = new THREE.Mesh(geo.wood, BM.wood); w.castShadow = true; g.add(w); if (geo.metal) g.add(new THREE.Mesh(geo.metal, BM.metal));
   let gate = null; if (pc.kind === 'door') { gate = new THREE.Group(); gate.position.x = -0.88; const gm = new THREE.Mesh(pieceGeo('gate').wood, BM.wood); gate.add(gm); g.add(gate); }
@@ -693,10 +708,10 @@ function placePiece(pc, i, j, defAxis) {
   refreshAround(i, j); return p;
 }
 function onWindowMoved() { // tile arrays slid with the player: re-lay built pieces, redo the flow field and the map
-  for (let n = 0; n < pieces.length; n++) { const p = pieces[n]; if (inb(p.i, p.j)) { p.k = idx(p.i, p.j); if (grid[p.k] !== p.tile) { p.under = grid[p.k]; grid[p.k] = p.tile; } owner[p.k] = n; } else p.k = -1; }
+  for (let n = 0; n < pieces.length; n++) { const p = pieces[n]; if (inb(p.i, p.j)) { p.k = idx(p.i, p.j); if (p.tile == null) continue; if (grid[p.k] !== p.tile) { p.under = grid[p.k]; grid[p.k] = p.tile; } owner[p.k] = n; } else p.k = -1; }
   G.flowDirty = true; G.mapDirty = true;
 }
-function removePiece(p) { const i = pieces.indexOf(p); if (i < 0) return; scene.remove(p.g); if (p.k >= 0 && inb(p.i, p.j)) { const k = idx(p.i, p.j); grid[k] = p.under; owner[k] = -1; } pieces.splice(i, 1); refreshAround(p.i, p.j); sfx.crash(0.4); G.flowDirty = true; G.mapDirty = true; }
+function removePiece(p) { const i = pieces.indexOf(p); if (i < 0) return; scene.remove(p.g); if (p.base) baseRemoved(p); if (p.tile != null && p.k >= 0 && inb(p.i, p.j)) { const k = idx(p.i, p.j); grid[k] = p.under; owner[k] = -1; } pieces.splice(i, 1); refreshAround(p.i, p.j); sfx.crash(0.4); G.flowDirty = true; G.mapDirty = true; }
 
 // ---------------- car ----------------
 function enterCar() { useSpec(car.spec, car.upg.tires); document.body.classList.toggle('hasnos', !!car.upg.nos); resetDriveTouch(); P.driving = true; P.carT = performance.now(); P.carStillT = 0; sfx.carDoor(); document.body.classList.add('driving'); $('carhud').classList.remove('hidden'); build.on = false; document.body.classList.remove('building'); $('buildbar').classList.add('hidden'); if (build.ghost) build.ghost.visible = false; setEngine(true, 0); }
@@ -735,8 +750,9 @@ function openUpg(v) {
   upgVeh = v; G.state = 'pause'; resetDriveTouch(); $('upgPanel').classList.remove('hidden'); renderUpg();
   if (document.pointerLockElement) document.exitPointerLock();
 }
-function closeUpg() { $('upgPanel').classList.add('hidden'); upgVeh = null; if (G.state === 'pause') G.state = 'play'; lastT = performance.now(); }
+function closeUpg() { $('upgPanel').classList.add('hidden'); upgVeh = null; shop = null; if (G.state === 'pause') G.state = 'play'; lastT = performance.now(); }
 function renderUpg() {
+  if (shop) return renderShop();
   const v = upgVeh; if (!v) return;
   $('upgTitle').textContent = v.spec.name.toUpperCase() + ' UPGRADES'; $('upgPts').textContent = G.points + ' points';
   $('upgList').innerHTML = UPGRADES.map(u => '<div class="upg"><div><b>' + u.name + '</b><small>' + u.desc + '</small></div>' + (v.upg[u.id] ? '<button disabled>INSTALLED</button>' : '<button data-u="' + u.id + '"' + (G.points < u.cost ? ' class="poor"' : '') + '>' + u.cost + '</button>') + '</div>').join('');
@@ -746,7 +762,7 @@ function buyUpg(id) {
   if (G.points < u.cost) { sfx.deny(); toast('Not enough points'); return; }
   addPts(-u.cost); v.upg[id] = true; showParts(v.parts, v.upg); sfx.build(); noise(v.x, v.z, 14); renderUpg(); toast(u.name + ' installed');
 }
-$('upgList').addEventListener('click', e => { const b = e.target.closest('button[data-u]'); if (b) buyUpg(b.dataset.u); });
+$('upgList').addEventListener('click', e => { const b = e.target.closest('button[data-u]'); if (b) buyUpg(b.dataset.u); const c = e.target.closest('button[data-w]'); if (c) shopBuy(c.dataset.w); });
 $('upgClose').onclick = () => closeUpg();
 // ---- roof turret: fires at the nearest zombie in front of the car ----
 const _tq = new THREE.Vector3();
@@ -759,6 +775,107 @@ function updTurret(v, dt) {
   if (best && v.turT <= 0) { v.turT = 0.16; P_.turretFlash.material.opacity = 1; sfx.shot(0.5, 1.1, false, 'lmg'); noise(v.x, v.z, 50); damageZombie(best, 70 + G.round * 9, false, 'turret'); }
 }
 function flipCar() { if (unstick(car)) { toast('Car back on its wheels'); sfx.carDoor(); } else toast('No clear spot nearby'); }
+// ---- Stage 2: base gear (generator, floodlights, workbench, traps, mines) and survivors to trade with ----
+const baseTraps = []; const baseLights = new Map(); let shop = null;
+const bulbOff = new THREE.MeshBasicMaterial({ color: 0x3a3a30 }), bulbOn = new THREE.MeshBasicMaterial({ color: 0xfff6d8 });
+function placeBase(pc, i, j, defAxis) {
+  const k = idx(i, j); const g = new THREE.Group(); const geo = baseGeo(pc.kind);
+  if (geo.wood) { const w = new THREE.Mesh(geo.wood, BM.wood); w.castShadow = true; g.add(w); }
+  if (geo.metal) { const m = new THREE.Mesh(geo.metal, BM.metal); m.castShadow = pc.kind !== 'mine' && pc.kind !== 'trap'; g.add(m); }
+  let bulb = null; if (pc.kind === 'lamp') { bulb = new THREE.Mesh(baseGeo('bulbs').metal, bulbOff); g.add(bulb); }
+  const ry = Math.round(P.yaw / (Math.PI / 2)) * (Math.PI / 2); // faces you, square to the grid
+  g.position.set(cx(i), 0, cx(j)); g.rotation.y = ry; scene.add(g);
+  const p = { k, i, j, x: cx(i), z: cx(j), g, hp: pc.hp, kind: pc.kind, tile: pc.tile, under: grid[k], defAxis, shape: pc.kind, base: true, bulb, uses: pc.kind === 'trap' ? 3 : 1, powered: false, ry };
+  pieces.push(p); if (pc.tile != null) { grid[k] = pc.tile; owner[k] = pieces.length - 1; G.flowDirty = true; G.mapDirty = true; }
+  if (pc.kind === 'trap' || pc.kind === 'mine') baseTraps.push(p);
+  sfx.build(); if (G.state === 'play') noise(cx(i), cx(j), 14);
+  repower(); if (pc.kind === 'gen') toast('Generator running - it powers floodlights and workbenches within ' + POWER_R + ' m, and zombies can hear it');
+  return p;
+}
+function baseRemoved(p) { const n = baseTraps.indexOf(p); if (n >= 0) baseTraps.splice(n, 1); setLamp(p, false); if (p.kind === 'gen') repower(); }
+function clearBase() { baseTraps.length = 0; for (const p of [...baseLights.keys()]) setLamp(p, false); }
+function setLamp(p, on) {
+  if (p.kind !== 'lamp') return; p.bulb.material = on ? bulbOn : bulbOff; const src = baseLights.get(p);
+  if (on && !src) { const s = { col: 0xfff0d0, base: 18, dist: 22, decay: 1.4, x: p.x, y: 2.9, z: p.z, flick: 0, kind: 'lamp' }; WD.lightSrc.push(s); baseLights.set(p, s); }
+  if (!on && src) { const n = WD.lightSrc.indexOf(src); if (n >= 0) WD.lightSrc.splice(n, 1); for (const sl of WD.lightPool) if (sl.src === src) { sl.src = null; sl.w = 0; } baseLights.delete(p); }
+}
+function repower() {
+  const gens = pieces.filter(p => p.kind === 'gen');
+  for (const p of pieces) if (p.kind === 'lamp' || p.kind === 'bench') { const on = gens.some(g => Math.hypot(g.x - p.x, g.z - p.z) <= POWER_R); p.powered = on; setLamp(p, on); }
+}
+// a zombie that walks onto a trap is held; one that steps near a mine sets it off. true = held this frame
+function zTraps(z, dt) {
+  if (z.holdT > 0) { z.holdT -= dt; return true; }
+  for (const p of baseTraps) {
+    const d = Math.hypot(z.x - p.x, z.z - p.z);
+    if (p.kind === 'trap' && d < 0.9) { z.holdT = z.type === 'boss' ? 1.5 : 4; sfx.nail(); sfx.spike(); damageZombie(z, 250 + G.round * 60, false, 'trap'); if (--p.uses <= 0) { removePiece(p); toast('A bear trap broke'); } return !z.dead; }
+    if (p.kind === 'mine' && d < 1.4) { removePiece(p); blast(p.x, p.z, 1600 + G.round * 180, 'mine'); return false; }
+  }
+  return false;
+}
+// survivors: each one's camp is set up the first time you come near, on open ground close to its spot
+const traders = TRADERS.map(t => ({ ...t, ready: false, tried: 0, s: null, g: null, line: 0 }));
+function campSpot(x, z) {
+  for (let r = 0; r <= 40; r += 2) for (let a = 0; a < 16; a++) {
+    const px = x + Math.cos(a / 16 * Math.PI * 2) * r, pz = z + Math.sin(a / 16 * Math.PI * 2) * r; let ok = true;
+    for (let di = -1; di <= 1 && ok; di++) for (let dj = -1; dj <= 1 && ok; dj++) { const ti = tileOf(px) + di, tj = tileOf(pz) + dj; if (!inb(ti, tj) || grid[idx(ti, tj)] !== OUT) ok = false; }
+    if (ok && !pushOut({ x: px, z: pz }, 2.4)) return { x: px, z: pz };
+    if (r === 0) break;
+  }
+  return null;
+}
+function setupTrader(t) {
+  const sp = campSpot(t.x, t.z); t.tried = G.t; if (!sp) return;
+  t.x = sp.x; t.z = sp.z; const g = new THREE.Group(); const geo = baseGeo('camp');
+  const w = new THREE.Mesh(geo.wood, BM.wood); w.castShadow = true; g.add(w); g.add(new THREE.Mesh(geo.metal, BM.metal));
+  const s = makeSurvivor(t.look); s.wrap.position.set(0, 0, -0.2); g.add(s.wrap); t.s = s;
+  g.position.set(t.x, 0, t.z); scene.add(g); t.g = g; t.ready = true;
+  t.fire = { col: 0xff7a30, base: 9, dist: 12, decay: 1.7, x: t.x + 1.0, y: 1.2, z: t.z + 0.2, kind: 'fire', i: 7 }; WD.lightSrc.push(t.fire);
+}
+function updBase(dt) {
+  for (const t of traders) {
+    const d = Math.hypot(t.x - P.x, t.z - P.z);
+    if (!t.ready) { if (d < 140 && G.t - t.tried > 3) setupTrader(t); continue; }
+    t.g.visible = d < 160; if (!t.g.visible) continue;
+    const s = t.s; animSoldier(s, G.t + t.x, 0, 0, false); if (d < 14) { const want = Math.atan2(P.x - t.x, P.z - t.z); s.wrap.rotation.y += (((want - s.wrap.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, dt * 4); }
+    if (d < 40 && R() < dt * 3) spriteFx(T.puff(), 0x707070, t.x + 1.0, 1.0, t.z + 0.2, 0.5, 1.4, { grow: 1.5, vy: 1.2, op: 0.4 });
+  }
+  G.genT = (G.genT || 0) - dt; const hum = G.genT <= 0; if (hum) G.genT = 0.5;
+  for (const p of pieces) if (p.kind === 'gen') { p.g.position.x = p.x + Math.sin(G.t * 70) * 0.006; if (hum) { if (Math.hypot(p.x - P.x, p.z - P.z) < 50) spriteFx(T.puff(), 0x404040, p.x + Math.cos(p.ry) * -0.7, 0.55, p.z + Math.sin(p.ry) * 0.7, 0.25, 0.9, { grow: 1.2, vy: 0.6, op: 0.5 }); if (G.state === 'play' && R() < 0.17) noise(p.x, p.z, 18); } }
+}
+function baseUse(use) {
+  for (const p of pieces) if (p.kind === 'bench' && near(p, 2.4)) {
+    if (!p.powered) return 'Workbench: needs a generator within ' + POWER_R + ' m';
+    if (use) openShop('craft'); return K() + ' Use the workbench (' + G.scrap + ' scrap)';
+  }
+  for (const t of traders) if (t.ready && near(t, 3.2)) { if (use) openShop('trade', t); return K() + ' Trade with ' + t.name; }
+  return '';
+}
+function openShop(kind, t) {
+  shop = { kind, t }; if (t) t.line = (t.line + 1) % t.hello.length;
+  G.state = 'pause'; resetDriveTouch(); $('upgPanel').classList.remove('hidden'); renderShop();
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+function renderShop() {
+  const sh = shop; if (!sh) return; const craft = sh.kind === 'craft';
+  $('upgTitle').textContent = craft ? 'WORKBENCH' : sh.t.name.toUpperCase();
+  $('upgPts').innerHTML = (craft ? '' : '<i>"' + sh.t.hello[sh.t.line] + '"</i><br>') + G.points + ' points &nbsp; ' + G.scrap + ' scrap &nbsp; traps ' + G.inv.trap + ' &nbsp; mines ' + G.inv.mine;
+  const list = craft ? RECIPES : WARES;
+  $('upgList').innerHTML = list.map(u => { const price = craft || u.id === 'sell' ? u.scrap + ' scrap' : u.cost + ''; const can = craft || u.id === 'sell' ? G.scrap >= u.scrap : G.points >= u.cost;
+    return '<div class="upg"><div><b>' + u.name + '</b><small>' + u.desc + '</small></div><button data-w="' + u.id + '"' + (can ? '' : ' class="poor"') + '>' + (craft ? 'MAKE ' : '') + price + '</button></div>'; }).join('');
+}
+function giveWare(id) {
+  if (id === 'trap' || id === 'mine') { G.inv[id]++; return (id === 'trap' ? 'Bear trap' : 'Landmine') + ' added - place it from BUILD'; }
+  if (id === 'nades') { if (P.nades >= 4) return null; P.nades = Math.min(4, P.nades + 2); return 'Grenades: ' + P.nades; }
+  if (id === 'ammo') { for (const g of P.guns) { g.clip = g.mag; g.reserve = g.maxReserve; } return 'Ammo full'; }
+}
+function shopBuy(id) {
+  const sh = shop; if (!sh) return; const craft = sh.kind === 'craft'; const u = (craft ? RECIPES : WARES).find(q => q.id === id); if (!u) return;
+  if (id === 'sell' && !craft) { if (G.scrap < 10) { sfx.deny(); toast('You need 10 scrap'); return; } G.scrap -= 10; G.points += 800; sfx.buy(); toast('Sold 10 scrap for 800 points'); }
+  else if (craft || false) { if (G.scrap < u.scrap) { sfx.deny(); toast('Need ' + u.scrap + ' scrap - zombies drop it'); return; } const msg = giveWare(id); if (!msg) { sfx.deny(); toast('You are carrying all you can'); return; } G.scrap -= u.scrap; sfx.build(); toast(msg); }
+  else { if (G.points < u.cost) { sfx.deny(); toast('Not enough points'); return; } const msg = giveWare(id); if (!msg) { sfx.deny(); toast('You are carrying all you can'); return; } addPts(u.cost, true); sfx.buy(); toast(msg); }
+  updHud(); drawBuildbar(); renderShop();
+}
 function updCar(dt) {
   const cg = car.mdl.group;
   for (const v of cars) if (v !== car && v.upg.turret) v.parts.turretFlash.material.opacity = 0;
@@ -838,6 +955,7 @@ function update(dt) {
   }
   P.recoil = Math.max(0, P.recoil - dt * 4);
   interact(dt);
+  updBase(dt);
   updCar(dt);
   // health
   if (G.t - P.lastHit > 3.5 && P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.5 * dt);
@@ -970,6 +1088,7 @@ $('bAdmBack').onclick = () => show('pause');
 for (const b of $('admMoney').children) b.onclick = () => { const n = +b.dataset.n; G.points += n; updHud(); admSync(); admMsg('Added ' + n.toLocaleString() + ' points to you.'); };
 for (const b of $('admPapSeg').children) b.onclick = () => { admPap = b.dataset.v === '1'; admSync(); };
 for (const b of $('admGuns').children) b.onclick = () => { giveGun(b.dataset.k, admPap); updHud(); admMsg('You now have the ' + gunNow().name + '.'); };
+$('admExtra').children[3].onclick = () => { G.scrap += 20; G.inv.trap += 2; G.inv.mine += 2; updHud(); drawBuildbar(); admMsg('Added 20 scrap, 2 bear traps and 2 landmines.'); };
 $('admExtra').children[0].onclick = () => { for (const g of P.guns) { g.clip = g.mag; g.reserve = g.maxReserve; } P.nades = Math.max(P.nades, 4); updHud(); admMsg('Ammo and grenades refilled.'); };
 $('admExtra').children[2].onclick = () => { G.fly = !G.fly; if (!G.fly) P.vy = -0.01; admSync(); admMsg(G.fly ? 'Flight on: fly where you look. Keyboard: Space up, Ctrl or Z down, Shift fast. Phone/controller: look up or down while moving.' : 'Flight off: you drop back to the ground.'); };
 $('admWorld').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.h) { SKY.hour = +b.dataset.h; admMsg('Time set to ' + SKY.clock() + '.'); } if (b.dataset.w) { SKY.setWeather(b.dataset.w); admMsg('Weather: ' + b.dataset.w + '. It fades in over about 20 seconds.'); } clockT = 0; });
@@ -995,4 +1114,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
