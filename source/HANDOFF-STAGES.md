@@ -1,0 +1,19 @@
+# Dead Shift: staged roadmap (hunting zombies -> day/night -> vehicles -> base/survivors -> extras)
+Read after HANDOFF-WORLD-FINISH.md. Each stage is published only after tests pass. Publish = `node scripts/build.mjs`, copy dist/index.html,
+dist/main.js to ../dead-shift-pub, rsync src/tests/scripts/index.html/HANDOFF*.md into ../dead-shift-pub/source, commit, push, then re-run tests on
+https://johnny4958.github.io/dead-shift/ . Local servers: 8112 = dist (new), 8113 = ../dead-shift-pub (live copy).
+
+## Stage 1: hunting zombies (DONE, published)
+- main.js "zombie senses" block: per-zombie `ai` = idle | drift | go | search | hunt, `alert` timer, `lkx/lkz` last known spot.
+  - sight: SIGHT 30 m * G.sightMul (day/night hook, 1 now) * stealth (still 0.65, walk 0.8, sprint 1, car 1.4), 66 deg cone unless already hunting, losTo().
+  - sound: noise(x,z,r) from guns (NOISE per kind), grenades 70, car engine 18+1.5*speed every 0.35 s, footsteps (sprint 10, walk 4),
+    knife 5, doors 16, mystery box 22, building 14, boarding windows 10. Zombies head to the spot (less exact with distance).
+  - blood: hurt() sets P.bleedT 14 s. Smell within 20 m (10 m in car) and an instanced trail of decals (blood[], max 40, 45 s).
+  - damage always reveals you (damageZombie -> spotP). Screamers only scream when they see you.
+  - lose you: hunt -> search around last seen (6 s) -> idle wander. Idle zombies drift toward you after 6-16 s, new spawns drift at once
+    (0.85 speed) and switch to search 5-9 m out, so rounds still come to you. Bosses always hunt.
+  - HUD: HIDDEN / SEARCHING / SPOTTED badge next to the zombie count; minimap dots dim for zombies not hunting.
+- **Big pre-existing bug fixed**: path following used `bk % GW` instead of ijOf(bk), so once the streaming window moved off the origin
+  (anywhere away from the motel) zombies walked the wrong way. Kills in 40 s with auto-aim (tests/roundcmp.py): Main St 11->16, Woods 0->13,
+  Ashford 7->15.
+- tests/hunt.py (sight, back turned, gunshot 35 m, engine 25 m, blood smell, blood trail, hiding, round) at 1280x720, 844x390, 390x844.

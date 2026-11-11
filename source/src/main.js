@@ -98,7 +98,7 @@ const keyName = a => inp.device === 'pad' ? ({ use: 'SQUARE', build: 'CIRCLE' }[
 const V3 = new THREE.Vector3(), V3b = new THREE.Vector3();
 
 // ---------------- game state ----------------
-const G = { state: 'title', t: 0, round: 0, toSpawn: 0, spawnT: 0, between: false, betweenT: 0, kills: 0, heads: 0, points: 0, power: false, flowT: 0, flowDirty: true, lastFlowK: -1, insta: 0, dbl: 0, pupsRound: 0, repairPts: 0, god: false, mapDirty: true };
+const G = { state: 'title', t: 0, round: 0, toSpawn: 0, spawnT: 0, between: false, betweenT: 0, kills: 0, heads: 0, points: 0, power: false, flowT: 0, flowDirty: true, lastFlowK: -1, insta: 0, dbl: 0, pupsRound: 0, repairPts: 0, god: false, mapDirty: true, sightMul: 1 };
 const P = { x: 0, z: 0, y: 0, vy: 0, yaw: 0, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, guns: [], cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, perks: new Set(), view: 'fp', bob: 0, ads: 0, recoil: 0, repT: 0, driving: false, semi: false, heartT: 0, speed: 0 };
 const zombies = []; const pups = []; const gases = []; const nades = []; const pieces = [];
 setProcProvider(genChunk);
@@ -144,7 +144,7 @@ function updHud() {
   $('nades').textContent = 'Grenades: ' + P.nades;
   $('perks').innerHTML = [...P.perks].map(k => { const p = WD.perks.find(q => q.key === k); return `<b style="background:${p.col};color:${p.col}"><span style="color:#fff">${p.name[0]}</span></b>`; }).join('');
   $('powerups').innerHTML = (G.insta > 0 ? `<div class="${G.insta < 5 ? 'blink' : ''}">INSTA-KILL<br>${Math.ceil(G.insta)}</div>` : '') + (G.dbl > 0 ? `<div class="${G.dbl < 5 ? 'blink' : ''}">DOUBLE POINTS<br>${Math.ceil(G.dbl)}</div>` : '');
-  const left = G.toSpawn + zombies.filter(z => !z.dead).length; $('zcount').textContent = G.between ? 'Next round soon' : 'Zombies left: ' + left;
+  const left = G.toSpawn + zombies.filter(z => !z.dead).length; $('zleft').textContent = G.between ? 'Next round soon' : 'Zombies left: ' + left;
 }
 // minimap
 const mmC = $('minimap'), mm = mmC.getContext('2d'); const mapImg = document.createElement('canvas'); const PPM = 3.6; let mapO = [0, 0];
@@ -160,7 +160,7 @@ function drawMinimap() {
   if (G.mapDirty) drawMapImg();
   const w = mmC.width, px = P.driving ? car.x : P.x, pz = P.driving ? car.z : P.z, yaw = P.driving ? car.h : P.yaw;
   mm.clearRect(0, 0, w, w); mm.save(); mm.translate(w / 2, w / 2); mm.rotate(yaw); mm.imageSmoothingEnabled = false; mm.drawImage(mapImg, (mapO[0] * S - px) * PPM, (mapO[1] * S - pz) * PPM, GW * S * PPM, GH * S * PPM);
-  mm.fillStyle = '#ff3030'; for (const z of zombies) if (!z.dead) { mm.beginPath(); mm.arc((z.x - px) * PPM, (z.z - pz) * PPM, 4, 0, 7); mm.fill(); }
+  for (const z of zombies) if (!z.dead) { const on = z.ai === 'hunt' || z.ai === 'go'; mm.fillStyle = on ? '#ff3030' : '#8a5050'; mm.beginPath(); mm.arc((z.x - px) * PPM, (z.z - pz) * PPM, on ? 4 : 3, 0, 7); mm.fill(); }
   mm.fillStyle = '#5ab0ff'; const b = WD.boxSpots[box.spot].pos; mm.fillRect((b.x - px) * PPM - 5, (b.z - pz) * PPM - 5, 10, 10);
   mm.fillStyle = '#ffd040'; mm.fillRect((car.x - px) * PPM - 4, (car.z - pz) * PPM - 7, 8, 14);
   mm.restore(); mm.fillStyle = '#fff'; mm.beginPath(); mm.moveTo(w / 2, w / 2 - 10); mm.lineTo(w / 2 - 7, w / 2 + 8); mm.lineTo(w / 2 + 7, w / 2 + 8); mm.fill();
@@ -207,7 +207,8 @@ function newGame() {
   for (const d of doors) WD.doorMeshes[d.id].visible = true;
   for (const w of windows) { w.planks = 6; WD.planks[w.id].list.forEach(p => p.visible = true); }
   Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0, god: false });
-  Object.assign(P, { x: startPos.x, z: startPos.z, y: 0, vy: 0, yaw: Math.PI, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, view: 'fp', ads: 0, driving: false });
+  Object.assign(P, { x: startPos.x, z: startPos.z, y: 0, vy: 0, yaw: Math.PI, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, view: 'fp', ads: 0, driving: false, bleedT: 0, stepN: 0 });
+  blood.length = 0; bloodMesh.count = 0; stealthShown = -1;
   P.perks.clear(); P.guns = [makeGun('pistol')]; setVmGun();
   setPower(false);
   box.spot = 0; box.state = 'idle'; box.uses = 0; if (box.model) { WD.box.gunSlot.remove(box.model); box.model = null; } WD.box.lid.rotation.x = 0; placeBox();
@@ -261,7 +262,54 @@ function spawnZombie(force) {
   if (type === 'screamer') { sp = 2.3; hp *= 0.7; }
   if (type === 'boss') { sp = 1.6 + Math.min(r * 0.01, 0.6); hp = zHp(r) * 14 + 4000; x = cx(si); z = cx(sj); sfx.zboss(Math.hypot(x - px, z - pz), 0); center('BOSS ZOMBIE<small>IT HEARD YOU</small>', 3); rumble(0.8, 0.8, 500); }
   m.root.position.set(x, -1.8, z); scene.add(m.root);
-  zombies.push({ m, type, x, z, hp, maxHp: hp, speed: sp, state: 'rise', t: 0, atk: 0, atkCd: 0, dead: false, deadT: 0, yaw: R() * 6.28, rip: 0, stun: 0, rage: 0, screamCd: 4 + R() * 4, screamT: 0, groanT: 2 + R() * 6, best: 1e9, stuckT: 0, cur: 0, head: false });
+  const zo = { m, type, x, z, hp, maxHp: hp, speed: sp, state: 'rise', t: 0, atk: 0, atkCd: 0, dead: false, deadT: 0, yaw: R() * 6.28, rip: 0, stun: 0, rage: 0, screamCd: 4 + R() * 4, screamT: 0, groanT: 2 + R() * 6, best: 1e9, stuckT: 0, cur: 0, head: false };
+  initAI(zo); zombies.push(zo);
+}
+// ---------------- zombie senses ----------------
+// Zombies hunt by sight, by sound (noise(): guns, the engine, footsteps, building, doors, the box) and by the smell of your
+// blood. Out of sight and quiet, a hunting zombie stays on you a few seconds, then searches where it last saw you, then gives up.
+// Idle zombies shamble about and the horde slowly drifts toward your area, so rounds keep coming to you.
+const SIGHT = 30, SMELL = 20;
+const NOISE = { pistol: 38, smg: 42, rifle: 55, ar: 50, shotgun: 52, lmg: 58, sniper: 70, ray: 35, wave: 45 };
+function initAI(z) { Object.assign(z, { ai: 'idle', alert: 0, sees: false, senseT: R() * 0.3, lkx: z.x, lkz: z.z, wx: z.x, wz: z.z, gx: z.x, gz: z.z, sx: z.x, sz: z.z, wanderT: 0, gBest: 1e9, gStuck: 0, driftT: 0, driftAt: 5 + R() * 9, driftStop: 5 + R() * 4, alertCd: 0 }); if (z.type === 'boss') { z.ai = 'hunt'; z.alert = 1e9; } else startDrift(z); }
+function startDrift(z) { z.ai = 'drift'; z.alert = 40; z.driftStop = 5 + R() * 4; }
+function searchAt(z, x, zz, t) { z.paused = false; z.ai = 'search'; z.sx = x; z.sz = zz; z.alert = t; z.wanderT = 0; z.gBest = 1e9; z.gStuck = 0; }
+function spotP(z, x, zz, t) { const was = z.ai; z.lkx = x; z.lkz = zz; z.alert = Math.max(z.alert, t); z.ai = 'hunt'; if (was !== 'hunt' && z.alertCd <= 0) { z.alertCd = 6; sfx.zgroan(z.type, Math.hypot(z.x - P.x, z.z - P.z), zPan(z.x - P.x, z.z - P.z)); } }
+function goTo(z, x, zz, t) { if (z.ai === 'hunt') { z.alert = Math.max(z.alert, 4); return; } z.ai = 'go'; z.lkx = x; z.lkz = zz; z.alert = Math.max(z.alert, t); z.gBest = 1e9; z.gStuck = 0; }
+function sense(z, dp, dx, dz, tx, tz) {
+  z.alertCd -= 0.25;
+  if (z.type === 'boss') { z.sees = true; z.ai = 'hunt'; z.lkx = tx; z.lkz = tz; return; }
+  const hunting = z.ai === 'hunt';
+  const stealth = P.driving ? 1.4 : P.sprinting ? 1 : P.speed > 0.6 ? 0.8 : 0.65; // standing still or creeping is hard to spot
+  const r = SIGHT * G.sightMul * stealth * (hunting ? 1.4 : 1);
+  let sees = dp < 2.2;
+  if (!sees && dp < r && (hunting || Math.abs(angDiff(z.yaw, Math.atan2(dx, dz))) < 1.15)) sees = losTo(z.x, z.z, tx, tz);
+  z.sees = sees;
+  if (sees) { spotP(z, tx, tz, 4); return; }
+  if (P.bleedT > 0 && dp < SMELL * (P.driving ? 0.5 : 1)) { spotP(z, tx, tz, 3); return; }
+  if (!hunting && blood.length) for (let n = blood.length - 1; n >= 0; n--) { const b = blood[n]; if (Math.hypot(b.x - z.x, b.z - z.z) < 3) { const nb = blood[blood.length - 1]; goTo(z, nb.x, nb.z, 10); break; } }
+}
+// a sound at (x, zz) that zombies hear out to r metres; they head for where it came from (less exact the farther away)
+function noise(x, zz, r) {
+  for (const z of zombies) { if (z.dead || z.state === 'rise' || z.type === 'boss' || !z.ai) continue; const d = Math.hypot(z.x - x, z.z - zz); if (d > r) continue; const e = d * 0.12; if (z.ai === 'hunt') { z.lkx = x; z.lkz = zz; } goTo(z, x + (R() - 0.5) * 2 * e, zz + (R() - 0.5) * 2 * e, Math.max(9, d / Math.max(0.8, z.speed * 0.9) + 5)); }
+}
+// blood trail: drops behind you for a while after you get hit
+const blood = [];
+const bloodMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.55, 0.55).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: T.blood(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }), 40);
+bloodMesh.count = 0; bloodMesh.frustumCulled = false; bloodMesh.renderOrder = 1; scene.add(bloodMesh);
+const bDummy = new THREE.Object3D();
+function updBlood(dt) {
+  let ch = false;
+  if (P.bleedT > 0) { P.bleedT -= dt; const last = blood[blood.length - 1]; if (!P.driving && P.y < 0.5 && (!last || Math.hypot(last.x - P.x, last.z - P.z) > 1.4)) { blood.push({ x: P.x + (R() - 0.5) * 0.3, z: P.z + (R() - 0.5) * 0.3, t: G.t, r: R() * 6.28, s: 0.5 + R() * 0.6 }); if (blood.length > 40) blood.shift(); ch = true; } }
+  while (blood.length && G.t - blood[0].t > 45) { blood.shift(); ch = true; }
+  if (!ch) return;
+  blood.forEach((b, n) => { bDummy.position.set(b.x, 0.03, b.z); bDummy.rotation.set(0, b.r, 0); bDummy.scale.setScalar(b.s); bDummy.updateMatrix(); bloodMesh.setMatrixAt(n, bDummy.matrix); });
+  bloodMesh.count = blood.length; bloodMesh.instanceMatrix.needsUpdate = true;
+}
+let stealthShown = -1;
+function updStealth() {
+  let s = 0; for (const z of zombies) { if (z.dead || z.state === 'rise' || !z.ai) continue; if (z.sees && z.ai === 'hunt') { s = 2; break; } if (z.ai === 'hunt' || z.ai === 'go' || z.ai === 'search') s = 1; }
+  if (s === stealthShown) return; stealthShown = s; const el = $('stealth'); el.textContent = ['HIDDEN', 'SEARCHING', 'SPOTTED'][s]; el.className = 's' + s;
 }
 function losTo(x0, z0, x1, z1) { const d = Math.hypot(x1 - x0, z1 - z0); return gridRay(x0, z0, x1 - x0, z1 - z0, d, (t, k) => solidZombie(t, k) || t === WIN) >= d - 0.01; }
 const N8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
@@ -275,20 +323,40 @@ function updZombie(z, dt, tx, tz) {
   if (z.type === 'screamer') {
     z.screamCd -= dt;
     if (z.screamT > 0) { z.screamT -= dt; m.scream = Math.min(1, m.scream + dt * 4); z.yaw += angDiff(z.yaw, Math.atan2(dx, dz)) * Math.min(1, dt * 6); m.root.position.set(z.x, 0, z.z); m.root.rotation.y = z.yaw; animZombie(m, G.t, 0, 0, false); if (z.screamT <= 0) { m.scream = 0; screamAlert(z); } return; }
-    if (z.screamCd <= 0 && dp < 24 && dp > 3 && losTo(z.x, z.z, tx, tz)) { z.screamT = 1.5; z.screamCd = 14 + R() * 6; sfx.zscream(dp, zPan(dx, dz)); return; }
+    if (z.screamCd <= 0 && dp < 24 && dp > 3 && z.sees && losTo(z.x, z.z, tx, tz)) { z.screamT = 1.5; z.screamCd = 14 + R() * 6; sfx.zscream(dp, zPan(dx, dz)); return; }
   }
   const i = tileOf(z.x), j = tileOf(z.z), k = inb(i, j) ? idx(i, j) : 0;
-  let gx = tx, gz = tz, mode = 'walk', target = null;
-  if (!(dp < 8 && losTo(z.x, z.z, tx, tz))) {
+  // senses and what the zombie is doing: hunt (knows where you are), go (heading for a noise or blood), search, drift, idle
+  z.senseT -= dt; if (z.senseT <= 0) { z.senseT = 0.2 + R() * 0.12; sense(z, dp, dx, dz, tx, tz); }
+  if (z.rage > 0) spotP(z, tx, tz, 3);
+  if (z.ai !== 'idle' && z.type !== 'boss') z.alert -= dt;
+  if (z.ai === 'hunt' && !z.sees && z.alert <= 0 && z.type !== 'boss') searchAt(z, z.lkx, z.lkz, 6); // lost you: search where it last saw you
+  else if ((z.ai === 'search' || z.ai === 'go' || z.ai === 'drift') && z.alert <= 0) { z.ai = 'idle'; z.wx = z.x; z.wz = z.z; z.driftT = 0; z.driftAt = 6 + R() * 10; z.wanderT = 0; }
+  else if (z.ai === 'drift' && dp < z.driftStop) searchAt(z, z.x, z.z, 5);
+  if (z.ai === 'idle') { z.driftT += dt; if (z.driftT > z.driftAt && G.state === 'play') startDrift(z); }
+  if (z.ai === 'go' && Math.hypot(z.lkx - z.x, z.lkz - z.z) < 1.6) searchAt(z, z.lkx, z.lkz, Math.max(z.alert, 5));
+  const usePath = z.ai === 'hunt' || z.ai === 'drift' || (z.ai === 'go' && Math.hypot(z.lkx - tx, z.lkz - tz) < 7);
+  let gx = tx, gz = tz, mode = 'walk', target = null, aiMul = z.ai === 'drift' ? 0.85 : z.ai === 'go' ? 0.95 : 1;
+  if (!usePath) {
+    if (z.ai === 'go') { gx = z.lkx; gz = z.lkz; }
+    else { // search / idle: wander between nearby open spots
+      z.wanderT -= dt;
+      if (!z.paused && Math.hypot(z.gx - z.x, z.gz - z.z) < 0.7) { z.paused = true; z.wanderT = 0.8 + R() * 2.5; } // stand and sway a moment
+      if (z.wanderT <= 0) { z.paused = false; const c = z.ai === 'search' ? [z.sx, z.sz, 5] : [z.wx, z.wz, 6]; z.wanderT = 2.5 + R() * 3; z.gBest = 1e9; for (let n = 0; n < 6; n++) { const a = R() * 6.28, rr = 1.5 + R() * c[2], x = c[0] + Math.sin(a) * rr, y = c[1] + Math.cos(a) * rr, ti = tileOf(x), tj = tileOf(y); if (!inb(ti, tj)) continue; const t = grid[idx(ti, tj)]; if (!solidZombie(t, idx(ti, tj)) && t !== WIN) { z.gx = x; z.gz = y; break; } } }
+      gx = z.paused ? z.x : z.gx; gz = z.paused ? z.z : z.gz; aiMul = z.ai === 'search' ? 0.5 : 0.3;
+    }
+    const gd = Math.hypot(gx - z.x, gz - z.z); if (gd < z.gBest - 0.3) { z.gBest = gd; z.gStuck = 0; } else if ((z.gStuck += dt) > 2.5) { z.gStuck = 0; z.gBest = 1e9; if (z.ai === 'go') searchAt(z, z.x, z.z, 5); else z.wanderT = 0; } // blocked: give up on that spot
+  }
+  if (usePath && !(z.ai === 'hunt' && dp < 8 && losTo(z.x, z.z, tx, tz))) {
     let best = dist[k], bk = -1;
     for (const [di, dj] of N8) { const ni = i + di, nj = j + dj; if (!inb(ni, nj)) continue; if (di && dj && (solidZombie(grid[idx(i + di, j)], idx(i + di, j)) || solidZombie(grid[idx(i, j + dj)], idx(i, j + dj)) || grid[idx(i + di, j)] === WIN || grid[idx(i, j + dj)] === WIN)) continue; const nk = idx(ni, nj); if (dist[nk] < best) { best = dist[nk]; bk = nk; } }
     if (bk >= 0) {
-      const t = grid[bk], bi = bk % GW, bj = (bk / GW) | 0; gx = cx(bi); gz = cx(bj);
+      const t = grid[bk], [bi, bj] = ijOf(bk); gx = cx(bi); gz = cx(bj);
       if (t === WIN && windows[owner[bk]].planks > 0) { const w = windows[owner[bk]]; mode = 'window'; target = w; gx = cx(w.i) + w.outDir[0] * 1.15; gz = cx(w.j) + w.outDir[1] * 1.15; }
       else if (t === BWALL || t === BDOOR) { mode = 'piece'; target = pieces.find(p => p.k === bk); }
     }
   }
-  let speed = z.speed * (z.rage > 0 ? 1.35 : 1); const onT = grid[k];
+  let speed = z.speed * aiMul * (z.rage > 0 ? 1.35 : 1); const onT = grid[k];
   if (onT === WIN) speed *= 0.45;
   if (onT === SPIKE) { speed *= 0.5; const p = pieces.find(q => q.k === k); z.hp -= 160 * dt * Math.max(1, G.round / 6); if (p) { p.hp -= 12 * dt; if (p.hp <= 0) removePiece(p); } if (R() < dt * 2) sfx.spike(); if (z.hp <= 0) { killZombie(z, 'spike'); return; } }
   let mvx = gx - z.x, mvz = gz - z.z; const ml = Math.hypot(mvx, mvz);
@@ -304,8 +372,8 @@ function updZombie(z, dt, tx, tz) {
   if (z.atk > 0) { const prev = z.atk; z.atk += dt / (z.type === 'boss' ? 1.0 : 0.8); if (prev < 0.5 && z.atk >= 0.5 && dp < 1.6 + reachX && P.y < 1.2) hurt(z.type === 'boss' ? (P.driving ? 30 : 60) : P.driving ? 18 : 34); if (z.atk >= 1) { z.atk = 0; z.atkCd = 0.4; } }
   const p = { x: z.x, z: z.z }; collide(p, 0.3, solidZombie); z.x = p.x; z.z = p.z;
   // progress / stuck
-  const d = dist[k]; if (d < z.best - 0.5) { z.best = d; z.stuckT = 0; } else z.stuckT += dt;
-  if ((z.stuckT > 22 && dp > 18) || dp > 140 || !inb(tileOf(z.x), tileOf(z.z))) { const sp = spawnSpot(P.x, P.z) || [tileOf(P.x) + 8, tileOf(P.z)]; const [si, sj] = sp; z.x = cx(si); z.z = cx(sj); z.best = 1e9; z.stuckT = 0; z.state = 'rise'; z.t = 0; }
+  const d = dist[k]; if (!usePath) { z.best = 1e9; z.stuckT = 0; } else if (d < z.best - 0.5) { z.best = d; z.stuckT = 0; } else z.stuckT += dt;
+  if ((z.stuckT > 22 && dp > 18) || dp > 140 || !inb(tileOf(z.x), tileOf(z.z))) { const sp = spawnSpot(P.x, P.z) || [tileOf(P.x) + 8, tileOf(P.z)]; const [si, sj] = sp; z.x = cx(si); z.z = cx(sj); z.best = 1e9; z.stuckT = 0; z.state = 'rise'; z.t = 0; initAI(z); }
   m.root.position.set(z.x, 0, z.z); m.root.rotation.y = z.yaw;
   z.cur = lerp(z.cur, attacking ? 0 : speed, Math.min(1, dt * 6));
   animZombie(m, G.t, z.cur, Math.max(attacking ? 0.5 + 0.5 * Math.sin(G.t * 6) : 0, z.atk > 0 ? Math.sin(z.atk * Math.PI) : 0), onT === WIN);
@@ -325,6 +393,7 @@ function separate() {
   }
 }
 function damageZombie(z, dmg, head, how) {
+  if (z.ai && !z.dead && how !== 'spike') { spotP(z, P.x, P.z, 5); z.yaw += angDiff(z.yaw, Math.atan2(P.x - z.x, P.z - z.z)) * 0.5; } // getting hurt tells it where you are
   if (z.dead) return;
   if (G.insta > 0 && z.type !== 'boss') dmg = 1e12;
   z.hp -= dmg; sfx.hit(head);
@@ -365,7 +434,7 @@ let flashT = 0;
 // ---------------- player ----------------
 function hurt(n) {
   if (G.god || G.state !== 'play') return;
-  P.hp -= n; P.lastHit = G.t; sfx.hurt(); rumble(0.8, 0.5, 200); $('dmg').style.opacity = 1;
+  P.hp -= n; P.lastHit = G.t; P.bleedT = 14; sfx.hurt(); rumble(0.8, 0.5, 200); $('dmg').style.opacity = 1;
   if (P.hp <= 0) {
     if (P.perks.has('revive')) { P.perks.delete('revive'); P.hp = P.maxHp; center('SECOND WIND<small>YOU GOT BACK UP</small>', 2.5); for (const z of zombies) if (!z.dead && Math.hypot(z.x - P.x, z.z - P.z) < 5) { z.x += (z.x - P.x) * 0.8; z.z += (z.z - P.z) * 0.8; } updHud(); }
     else gameOver();
@@ -392,7 +461,7 @@ const rayO = new THREE.Vector3(), rayD = new THREE.Vector3();
 function fireGun() {
   const g = gunNow(); if (!g) return;
   g.clip--; P.fireT = 60 / (g.rpm * (P.perks.has('double') ? 1.33 : 1)); P.recoil = Math.min(1, P.recoil + 0.35);
-  const d = g.def; sfx.shot(d.sound[0], d.sound[1], !!d.wonder, d.kind); rumble(0.3, 0.6, 60);
+  const d = g.def; sfx.shot(d.sound[0], d.sound[1], !!d.wonder, d.kind); rumble(0.3, 0.6, 60); noise(P.x, P.z, NOISE[d.kind] || 45);
   camera.getWorldPosition(rayO);
   const pellets = d.pellets || 1;
   for (let n = 0; n < pellets; n++) {
@@ -447,7 +516,7 @@ function shootRay(o, d, g) {
   else if (!hits.length) spriteFx(T.puff(), 0x999080, ex, ey, ez, 0.25, 0.4, { grow: 0.8 });
 }
 function knife() {
-  if (P.knifeT > 0) return; P.knifeT = 0.5; sfx.knife();
+  if (P.knifeT > 0) return; P.knifeT = 0.5; sfx.knife(); noise(P.x, P.z, 5);
   let best = null, bd = 1.9;
   for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const dx = z.x - P.x, dz = z.z - P.z, d = Math.hypot(dx, dz); const a = Math.abs(angDiff(Math.atan2(-dx, -dz), P.yaw)); if (d < bd && a < 1.0) { bd = d; best = z; } }
   if (best) damageZombie(best, 150 + G.round * 25, false, 'knife');
@@ -460,7 +529,7 @@ function throwNade() {
 }
 function updNades(dt) {
   for (let i = nades.length - 1; i >= 0; i--) { const n = nades[i]; n.t -= dt; n.vy -= 18 * dt; const nx = n.x + n.vx * dt, nz = n.z + n.vz * dt; const tt = at(tileOf(nx), tileOf(nz)); if (solidPlayer(tt) || tt === WIN) { n.vx *= -0.4; n.vz *= -0.4; } else { n.x = nx; n.z = nz; } n.y += n.vy * dt; if (n.y < 0.08) { n.y = 0.08; n.vy *= -0.35; n.vx *= 0.7; n.vz *= 0.7; } n.m.position.set(n.x, n.y, n.z);
-    if (n.t <= 0) { scene.remove(n.m); nades.splice(i, 1); sfx.boom(); rumble(1, 1, 300); spriteFx(T.glow(), 0xffa040, n.x, 1, n.z, 3, 0.4, { add: true, grow: 10 }); spriteFx(T.puff(), 0x505050, n.x, 1.2, n.z, 2, 1.6, { grow: 3, vy: 0.8, op: 0.8 });
+    if (n.t <= 0) { scene.remove(n.m); nades.splice(i, 1); sfx.boom(); noise(n.x, n.z, 70); rumble(1, 1, 300); spriteFx(T.glow(), 0xffa040, n.x, 1, n.z, 3, 0.4, { add: true, grow: 10 }); spriteFx(T.puff(), 0x505050, n.x, 1.2, n.z, 2, 1.6, { grow: 3, vy: 0.8, op: 0.8 });
       for (const z of zombies) { if (z.dead) continue; const d = Math.hypot(z.x - n.x, z.z - n.z); if (d < 5.5) damageZombie(z, (900 + G.round * 120) * (1 - d / 6), false, 'nade'); }
       const pd = Math.hypot(P.x - n.x, P.z - n.z); if (pd < 3.5 && !P.driving) hurt(25 * (1 - pd / 3.5)); } }
 }
@@ -485,7 +554,7 @@ function interact(dt) {
   if (readOpen) { const r = readOpen.r; if (Math.hypot(r.x - P.x, r.z - P.z) > (r.r || 3) + 2 || performance.now() - readOpen.t > 12000) closeRead(); else if (use) { closeRead(); prompt(''); return; } }
   // window repair
   let repairing = false;
-  for (const w of windows) { const ip = { x: cx(w.i) - w.outDir[0] * 1.1, z: cx(w.j) - w.outDir[1] * 1.1 }; if (w.planks < 6 && near(ip, 1.6)) { txt = 'Hold ' + K() + ' to rebuild the barrier'; if (hold) { repairing = true; P.repT += dt; if (P.repT > 0.7) { P.repT = 0; WD.planks[w.id].list[w.planks].visible = true; w.planks++; sfx.nail(); G.flowDirty = true; if (G.repairPts < 500) { addPts(10); G.repairPts += 10; } updHud(); } } break; } }
+  for (const w of windows) { const ip = { x: cx(w.i) - w.outDir[0] * 1.1, z: cx(w.j) - w.outDir[1] * 1.1 }; if (w.planks < 6 && near(ip, 1.6)) { txt = 'Hold ' + K() + ' to rebuild the barrier'; if (hold) { repairing = true; P.repT += dt; if (P.repT > 0.7) { P.repT = 0; WD.planks[w.id].list[w.planks].visible = true; w.planks++; sfx.nail(); noise(P.x, P.z, 10); G.flowDirty = true; if (G.repairPts < 500) { addPts(10); G.repairPts += 10; } updHud(); } } break; } }
   if (!repairing) P.repT = 0;
   if (!txt) for (const d of doors) { if (d.open) continue; let sx = 0, sz = 0; for (const [i, j] of d.tiles) { sx += cx(i); sz += cx(j); } if (near({ x: sx / d.tiles.length, z: sz / d.tiles.length }, 2.6)) { txt = K() + ' Open door to ' + d.label + ' [' + d.cost + ']'; if (use && buy(d.cost)) openDoor(d); break; } }
   if (!txt) for (const wb of WD.wallbuys) if (near(wb.use, 1.6)) { const have = P.guns.find(g => g.key === wb.key); const c = have ? (have.pap ? 4500 : Math.round(wb.cost / 2)) : wb.cost; txt = K() + (have ? ' Buy ammo for ' + have.name : ' Buy ' + W[wb.key].name) + ' [' + c + ']'; if (use && buy(c)) { if (have) { have.reserve = have.maxReserve; have.clip = have.mag; updHud(); } else giveGun(wb.key); } break; }
@@ -501,8 +570,8 @@ function interact(dt) {
   if (!txt) txt = readables(use);
   prompt(txt || (build.on ? build.promptTxt || '' : ''));
 }
-function openDoor(d) { d.open = true; for (const [i, j] of d.tiles) { grid[idx(i, j)] = FLOOR; zone[idx(i, j)] = d.zone; } openZones.add(d.zone); WD.doorMeshes[d.id].visible = false; sfx.door(); G.flowDirty = true; G.mapDirty = true; toast(d.label + ' opened'); }
-function openBox() { box.state = 'rolling'; box.t = 0; box.cycleT = 0; box.uses++; sfx.box(); }
+function openDoor(d) { d.open = true; for (const [i, j] of d.tiles) { grid[idx(i, j)] = FLOOR; zone[idx(i, j)] = d.zone; } openZones.add(d.zone); WD.doorMeshes[d.id].visible = false; sfx.door(); noise(P.x, P.z, 16); G.flowDirty = true; G.mapDirty = true; toast(d.label + ' opened'); }
+function openBox() { box.state = 'rolling'; box.t = 0; box.cycleT = 0; box.uses++; sfx.box(); noise(P.x, P.z, 22); }
 function closeBox() { box.state = 'idle'; if (box.model) { WD.box.gunSlot.remove(box.model); box.model = null; } }
 function setBoxModel(key) { if (box.model) WD.box.gunSlot.remove(box.model); box.model = gunModel(key, false).group; box.model.scale.setScalar(2); box.model.rotation.y = Math.PI / 2; WD.box.gunSlot.add(box.model); }
 function updBox(dt) {
@@ -597,7 +666,7 @@ function placePiece(pc, i, j, defAxis) {
   let gate = null; if (pc.kind === 'door') { gate = new THREE.Group(); gate.position.x = -0.88; const gm = new THREE.Mesh(pieceGeo('gate').wood, BM.wood); gate.add(gm); g.add(gate); }
   const sh = shapeOf(pc.kind, i, j, defAxis);
   g.position.set(cx(i), 0, cx(j)); g.rotation.y = sh.ry; scene.add(g);
-  const p = { k, i, j, x: cx(i), z: cx(j), g, gate, hp: pc.hp, kind: pc.kind, tile: pc.tile, under: grid[k], defAxis, shape: sh.key }; pieces.push(p); grid[k] = pc.tile; owner[k] = pieces.length - 1; sfx.build(); G.flowDirty = true; G.mapDirty = true;
+  const p = { k, i, j, x: cx(i), z: cx(j), g, gate, hp: pc.hp, kind: pc.kind, tile: pc.tile, under: grid[k], defAxis, shape: sh.key }; pieces.push(p); grid[k] = pc.tile; owner[k] = pieces.length - 1; sfx.build(); if (G.state === 'play') noise(cx(i), cx(j), 14); G.flowDirty = true; G.mapDirty = true;
   refreshAround(i, j); return p;
 }
 function onWindowMoved() { // tile arrays slid with the player: re-lay built pieces, redo the flow field and the map
@@ -643,6 +712,7 @@ function updCar(dt) {
     const spd = Math.hypot(car.vx, car.vz);
     for (const z of zombies) { if (z.dead || z.state === 'rise') continue; if (Math.hypot(z.x - car.x, z.z - car.z) < 1.9) { if (spd > 5) { sfx.splat(); damageZombie(z, 400 + spd * 120 + G.round * 40, false, 'car'); car.vx *= 0.9; car.vz *= 0.9; } else { const dx = z.x - car.x, dz = z.z - car.z, d = Math.hypot(dx, dz) || 1; z.x = car.x + dx / d * 1.9; z.z = car.z + dz / d * 1.9; } } }
     P.x = car.x; P.z = car.z;
+    P.engN = (P.engN || 0) - dt; if (P.engN <= 0) { P.engN = 0.35; noise(car.x, car.z, Math.min(55, 18 + spd * 1.5 + (car.squeal || 0) * 15)); } // engine, burnouts and squeal carry
     const rev = car.launch > 0 && car.launch < 0.75 || (ctl.gas > 0.5 && ctl.brake > 0.5) ? 0.85 : Math.min(1, spd / 31 + ctl.gas * 0.12);
     setEngine(true, rev); setSqueal(car.squeal);
     $('carhud').innerHTML = Math.round(spd * 2.237) + ' <small>MPH</small>' + (car.stuckT > 1.5 ? '<div class="stuck">Stuck? ' + (inp.device === 'touch' ? 'Tap FLIP' : inp.device === 'pad' ? 'Press TRIANGLE' : 'Press R') + '</div>' : '');
@@ -711,7 +781,9 @@ function update(dt) {
   if (recenter(P.x, P.z)) onWindowMoved();
   if (G.flowDirty || (pk !== G.lastFlowK && G.flowT <= 0)) { flow([[tileOf(P.x), tileOf(P.z)]]); G.lastFlowK = pk; G.flowT = 0.25; G.flowDirty = false; for (const z of zombies) { z.best = 1e9; } }
   for (let i = zombies.length - 1; i >= 0; i--) { const z = zombies[i]; if (z) updZombie(z, dt, P.x, P.z); }
-  separate();
+  separate(); updBlood(dt); updStealth();
+  // footsteps: sprinting is heard nearby, walking only right next to a zombie, standing still is silent
+  if (!P.driving && P.y < 0.3 && P.speed > 1) { P.stepN -= dt; if (P.stepN <= 0) { P.stepN = P.sprinting ? 0.4 : 0.6; noise(P.x, P.z, P.sprinting ? 10 : 4); } }
   if (G.state !== 'play') return;
   updRounds(dt); updNades(dt); updBox(dt);
   // gas
@@ -857,4 +929,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

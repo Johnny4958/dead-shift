@@ -68,6 +68,7 @@ canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
 #scope::after{content:'';position:absolute;left:50%;top:50%;width:64vh;height:1px;background:#000;transform:translate(-50%,0)}
 #scope::before{content:'';position:absolute;left:50%;top:50%;height:64vh;width:1px;background:#000;transform:translate(0,-50%)}
 #minimapWrap{position:absolute;top:calc(10px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));width:118px;height:118px;border-radius:50%;overflow:hidden;border:2px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45)}
+#stealth{margin-left:8px;vertical-align:1px;font-size:11px;font-weight:800;letter-spacing:1.5px;padding:1px 6px;border-radius:4px;text-shadow:1px 1px 0 #000;pointer-events:none}#stealth.s0{color:#9aa;background:rgba(0,0,0,.35)}#stealth.s1{color:#ffd23a;background:rgba(60,45,0,.5)}#stealth.s2{color:#fff;background:rgba(170,20,20,.75)}
 #zcount{position:absolute;top:calc(132px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left));font-size:14px;font-weight:600;color:#ccc;text-shadow:1px 1px 0 #000}
 #toast{position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);background:rgba(0,0,0,.7);border:1px solid #555;padding:6px 14px;border-radius:6px;font-weight:600;font-size:16px;opacity:0;transition:opacity .3s;white-space:nowrap}
 #toast.show{opacity:1}
@@ -177,7 +178,7 @@ body.upright #rotateMsg{display:none!important}
 <div id="hud" class="hidden">
   <div id="dmg"></div><div id="toxicfx"></div><div id="scope"></div><div id="flash"></div>
   <div id="minimapWrap"><canvas id="minimap" width="236" height="236" style="width:118px;height:118px"></canvas></div>
-  <div id="zcount"></div>
+  <div id="zcount"><span id="zleft"></span><span id="stealth" class="s0">HIDDEN</span></div>
   <div id="cross"><i></i><i></i><i></i><i></i></div><div id="hit"></div>
   <div id="round"></div>
   <div id="perks"></div>
