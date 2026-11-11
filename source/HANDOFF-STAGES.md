@@ -17,3 +17,16 @@ https://johnny4958.github.io/dead-shift/ . Local servers: 8112 = dist (new), 811
   (anywhere away from the motel) zombies walked the wrong way. Kills in 40 s with auto-aim (tests/roundcmp.py): Main St 11->16, Woods 0->13,
   Ashford 7->15.
 - tests/hunt.py (sight, back turned, gunshot 35 m, engine 25 m, blood smell, blood trail, hiding, round) at 1280x720, 844x390, 390x844.
+
+## Stage 2: day/night, weather, flashlight (DONE, published)
+- src/sky.js: makeSky() drives hemi/moonL (sun by day), fog colour/density, exposure, a fading day sky dome + sun sprite, stars/moon
+  fade (W_.skyParts in world.js), GPU rain (one LineSegments draw), lightning + thunder (sfx.thunder), rain hiss (audio setRain).
+  DAY_SEC 720 (12 real min/day), new game starts 9:30 PM so the classic night opener stays; dawn about 4 min in.
+  Weather picks every 3-6 min from clear, clear, fog, rain, storm; fades over ~20 s; toast on change.
+- Flashlight: one SpotLight always in the scene (intensity 0 when off, so no shader recompiles). Auto on at dusk / off at dawn unless
+  toggled; LIGHT touch button (under BUILD, hidden while building/driving), L key, D-pad down outside build mode.
+- Nights are brighter than before (ground ~30% brighter in screenshots). Light pool lamps dim 70% by day (fires stay).
+- G.sightMul = SKY.sightMul: zombies see 0.7x at night, 1.25x by day, less in fog/rain; flashlight on in the dark raises it to 1.05.
+- Admin panel: Time/weather row (NOON, DUSK, MIDNIGHT, CLEAR, FOG, RAIN, STORM).
+- Fog culling limit follows fog density (min(105, 1.87/density)), so clear noon draws ~10% more at Main St landscape, fog draws less.
+- tests/sky.py (screens + cost + brightness per time/weather vs live), tests/skytap.py (real taps on LIGHT + admin, a day running with a round).

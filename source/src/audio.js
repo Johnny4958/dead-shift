@@ -114,6 +114,7 @@ export const sfx = {
   power() { if (!ctx) return; const t = now(); tone(t, 50, 300, 2.0, 0.4, 'sawtooth'); noise(t, 1.5, 800, 1, 0.3); tone(t + 1.6, 900, 900, 0.3, 0.2, 'square'); },
   perk() { if (!ctx) return; const t = now(); noise(t, 0.15, 2000, 1, 0.2); [523, 659, 784, 1046].forEach((f, i) => tone(t + 0.25 + i * 0.09, f, f, 0.2, 0.15, 'triangle')); },
   powerup(kind) { if (!ctx) return; const t = now(); const n = kind === 'nuke' ? [200, 100, 50] : [660, 880, 1100, 1320]; n.forEach((f, i) => tone(t + i * 0.08, f, f, 0.25, 0.25, kind === 'nuke' ? 'sawtooth' : 'square')); if (kind === 'nuke') noise(t, 1.6, 200, 0.5, 0.8); },
+  thunder() { if (!ctx) return; const t = now(); noise(t, 0.35, 900, 0.6, 0.35); noise(t + 0.05, 3.2, 120, 0.5, 0.9); noise(t + 0.4, 2.4, 70, 0.4, 0.7); },
   boom() { if (!ctx) return; const t = now(); noise(t, 1.2, 380, 0.4, 1.0); tone(t, 90, 25, 0.9, 0.8); },
   spike() { if (!ctx) return; const t = now(); noise(t, 0.12, 1500, 2, 0.25, 'bandpass'); },
   build() { if (!ctx) return; const t = now(); for (let i = 0; i < 3; i++) { tone(t + i * 0.09, 1500, 1100, 0.05, 0.25, 'square'); noise(t + i * 0.09, 0.07, 3500, 3, 0.25, 'bandpass'); } },
@@ -138,6 +139,12 @@ export function setSqueal(level) { // tyre squeal: a narrow band of noise plus a
   if (!squeal && level > 0) { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2100; f.Q.value = 6; const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.value = 980; const lfo = ctx.createOscillator(); lfo.frequency.value = 9; const lg = ctx.createGain(); lg.gain.value = 60; lfo.connect(lg); lg.connect(o.frequency); const og = ctx.createGain(); og.gain.value = 0.25; o.connect(og); const g = ctx.createGain(); g.gain.value = 0.0001; s.connect(f); f.connect(g); og.connect(g); g.connect(master); s.start(); o.start(); lfo.start(); squeal = { g, f, o }; }
   if (!squeal) return; const t = now();
   squeal.g.gain.setTargetAtTime(Math.max(0.0001, level * 0.22), t, 0.06); squeal.f.frequency.setTargetAtTime(1700 + level * 900, t, 0.1); squeal.o.frequency.setTargetAtTime(860 + level * 260, t, 0.1);
+}
+let rainSrc = null;
+export function setRain(level) { // looping hiss for rain; level 0..1
+  if (!ctx) return;
+  if (!rainSrc && level > 0.01) { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; s.playbackRate.value = 0.9; const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 0.4; const f2 = ctx.createBiquadFilter(); f2.type = 'lowpass'; f2.frequency.value = 600; const g = ctx.createGain(); g.gain.value = 0.0001; const g2 = ctx.createGain(); g2.gain.value = 0.0001; s.connect(f); f.connect(g); g.connect(master); s.connect(f2); f2.connect(g2); g2.connect(master); s.start(); rainSrc = { s, g, g2 }; }
+  if (!rainSrc) return; const t = now(); rainSrc.g.gain.setTargetAtTime(Math.max(0.0001, level * 0.06), t, 0.5); rainSrc.g2.gain.setTargetAtTime(Math.max(0.0001, level * 0.05), t, 0.5);
 }
 function ambience() { // low wind + distant drone
   const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 260; const g = ctx.createGain(); g.gain.value = 0.05; s.connect(f); f.connect(g); g.connect(master); s.start();

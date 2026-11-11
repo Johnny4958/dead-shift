@@ -67,6 +67,7 @@ canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
 #scope{position:absolute;inset:0;background:radial-gradient(circle at center,transparent 0 32vh,#000 32.3vh);opacity:0}
 #scope::after{content:'';position:absolute;left:50%;top:50%;width:64vh;height:1px;background:#000;transform:translate(-50%,0)}
 #scope::before{content:'';position:absolute;left:50%;top:50%;height:64vh;width:1px;background:#000;transform:translate(0,-50%)}
+#clock{position:absolute;left:0;right:0;bottom:9px;text-align:center;font-size:10px;font-weight:700;color:#dde;text-shadow:1px 1px 0 #000;pointer-events:none;letter-spacing:.5px}
 #minimapWrap{position:absolute;top:calc(10px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));width:118px;height:118px;border-radius:50%;overflow:hidden;border:2px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45)}
 #stealth{margin-left:8px;vertical-align:1px;font-size:11px;font-weight:800;letter-spacing:1.5px;padding:1px 6px;border-radius:4px;text-shadow:1px 1px 0 #000;pointer-events:none}#stealth.s0{color:#9aa;background:rgba(0,0,0,.35)}#stealth.s1{color:#ffd23a;background:rgba(60,45,0,.5)}#stealth.s2{color:#fff;background:rgba(170,20,20,.75)}
 #zcount{position:absolute;top:calc(132px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left));font-size:14px;font-weight:600;color:#ccc;text-shadow:1px 1px 0 #000}
@@ -138,6 +139,7 @@ body[data-device=touch] #touch.live{display:block}
 .tb.sq{border-radius:10px;width:58px;height:34px;font-size:12px}
 .tb[data-b=pause]{top:calc(10px + env(safe-area-inset-top));right:calc(12px + env(safe-area-inset-right))}
 .tb[data-b=view]{top:calc(10px + env(safe-area-inset-top));right:calc(78px + env(safe-area-inset-right))}
+.tb[data-b=light]{top:calc(52px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right))}body.building .tb[data-b=light],body.driving .tb[data-b=light]{display:none}.tb[data-b=light].lock{background:rgba(160,140,40,.5);border-color:rgba(255,230,120,.8)}
 .tb[data-b=build]{top:calc(10px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right))}
 .tb[data-b=rotate]{top:calc(52px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right))}
 body:not(.building) .tb[data-b=rotate]{display:none}
@@ -177,7 +179,7 @@ body.upright #rotateMsg{display:none!important}
 <canvas id="c"></canvas>
 <div id="hud" class="hidden">
   <div id="dmg"></div><div id="toxicfx"></div><div id="scope"></div><div id="flash"></div>
-  <div id="minimapWrap"><canvas id="minimap" width="236" height="236" style="width:118px;height:118px"></canvas></div>
+  <div id="minimapWrap"><canvas id="minimap" width="236" height="236" style="width:118px;height:118px"></canvas><div id="clock"></div></div>
   <div id="zcount"><span id="zleft"></span><span id="stealth" class="s0">HIDDEN</span></div>
   <div id="cross"><i></i><i></i><i></i><i></i></div><div id="hit"></div>
   <div id="round"></div>
@@ -208,6 +210,7 @@ body.upright #rotateMsg{display:none!important}
   <div class="tb sq" data-b="view">VIEW</div>
   <div class="tb sq" data-b="build">BUILD</div>
   <div class="tb sq" data-b="rotate">ROTATE</div>
+  <div class="tb sq" data-b="light" id="bLight">LIGHT</div>
   <div class="tb bld" data-b="place">PLACE</div>
   <div class="tb drv" data-b="gas">GAS</div>
   <div class="tb drv" data-b="brake">BRAKE<br>REV</div>
@@ -263,6 +266,7 @@ body.upright #rotateMsg{display:none!important}
     <div class="opt">Give gun<div class="row seg" id="admPapSeg"><button data-v="0">NORMAL</button><button data-v="1">UPGRADED</button></div></div>
     <div class="row seg" id="admGuns" style="flex-wrap:wrap;gap:4px;justify-content:flex-start"></div>
     <div class="opt" style="margin-top:8px">Extras<div class="row seg" id="admExtra"><button data-a="ammo">REFILL AMMO</button><button data-a="god">GOD MODE: OFF</button><button data-a="fly">FLY: OFF</button></div></div>
+    <div class="opt">Time / weather<div class="row seg" id="admWorld" style="flex-wrap:wrap"><button data-h="12">NOON</button><button data-h="18.2">DUSK</button><button data-h="0">MIDNIGHT</button><button data-w="clear">CLEAR</button><button data-w="fog">FOG</button><button data-w="rain">RAIN</button><button data-w="storm">STORM</button></div></div>
     <div class="hint" id="admMsg" style="text-align:left;margin:6px 0 0;min-height:18px"></div>
   </div>
   <button class="btn" id="bAdmBack">BACK</button>
@@ -272,9 +276,9 @@ body.upright #rotateMsg{display:none!important}
     <h3>HOW TO PLAY</h3>
     Survive as many rounds as you can. Shooting zombies earns points. Spend points on doors, guns on the walls, the Mystery Box, perk machines, and base building. Zombies break the boards off the windows. Stand at a window and hold USE to nail them back for points. Open the Parking Lot door to reach the car and the open ground for building. Turn on the power in the Garage to wake up the perk machines and The Forge.
     <h3>KEYBOARD &amp; MOUSE</h3>
-    <table><tr><td>Move / Sprint</td><td>W A S D / Shift</td></tr><tr><td>Look / Shoot / Aim</td><td>Mouse / Left click / Right click (click the game first to lock the mouse)</td></tr><tr><td>Use, buy, repair, drive</td><td>F or E (hold to repair windows)</td></tr><tr><td>Reload / Swap gun</td><td>R / Q, 1, 2 or mouse wheel</td></tr><tr><td>Knife / Grenade / Jump</td><td>V / G / Space</td></tr><tr><td>1st / 3rd person</td><td>C</td></tr><tr><td>Build mode</td><td>B, then click to place, Q to change piece, T to rotate</td></tr><tr><td>Pause</td><td>Esc or P</td></tr><tr><td>Car</td><td>W/S gas and brake, A/D steer, F to get out</td></tr></table>
+    <table><tr><td>Move / Sprint</td><td>W A S D / Shift</td></tr><tr><td>Look / Shoot / Aim</td><td>Mouse / Left click / Right click (click the game first to lock the mouse)</td></tr><tr><td>Use, buy, repair, drive</td><td>F or E (hold to repair windows)</td></tr><tr><td>Reload / Swap gun</td><td>R / Q, 1, 2 or mouse wheel</td></tr><tr><td>Knife / Grenade / Jump</td><td>V / G / Space</td></tr><tr><td>1st / 3rd person</td><td>C</td></tr><tr><td>Flashlight</td><td>L</td></tr><tr><td>Build mode</td><td>B, then click to place, Q to change piece, T to rotate</td></tr><tr><td>Pause</td><td>Esc or P</td></tr><tr><td>Car</td><td>W/S gas and brake, A/D steer, F to get out</td></tr></table>
     <h3>PS5 CONTROLLER</h3>
-    <table><tr><td>Move / Look</td><td>Left stick / Right stick (click L3 to sprint)</td></tr><tr><td>Shoot / Aim</td><td>R2 / L2</td></tr><tr><td>Use, buy, repair, reload</td><td>Square (hold at windows to repair)</td></tr><tr><td>Swap gun</td><td>Triangle</td></tr><tr><td>Knife / Grenade / Jump</td><td>R1 or R3 / L1 / Cross</td></tr><tr><td>Build mode</td><td>Circle, then R2 to place, Triangle to change piece, D-pad down to rotate</td></tr><tr><td>1st / 3rd person</td><td>D-pad up</td></tr><tr><td>Pause</td><td>Options</td></tr><tr><td>Car</td><td>R2 gas, L2 brake, left stick steer, Square to get out</td></tr></table>
+    <table><tr><td>Move / Look</td><td>Left stick / Right stick (click L3 to sprint)</td></tr><tr><td>Shoot / Aim</td><td>R2 / L2</td></tr><tr><td>Use, buy, repair, reload</td><td>Square (hold at windows to repair)</td></tr><tr><td>Swap gun</td><td>Triangle</td></tr><tr><td>Knife / Grenade / Jump</td><td>R1 or R3 / L1 / Cross</td></tr><tr><td>Build mode</td><td>Circle, then R2 to place, Triangle to change piece, D-pad down to rotate</td></tr><tr><td>1st / 3rd person</td><td>D-pad up</td></tr><tr><td>Flashlight</td><td>D-pad down (outside build mode)</td></tr><tr><td>Pause</td><td>Options</td></tr><tr><td>Car</td><td>R2 gas, L2 brake, left stick steer, Square to get out</td></tr></table>
     <h3>TOUCH (PHONE)</h3>
     <table><tr><td>Move</td><td>Drag anywhere on the left side</td></tr><tr><td>Look</td><td>Drag on the right side. You can drag while holding FIRE.</td></tr><tr><td>Buttons</td><td>FIRE, AIM (tap to toggle), RELOAD, USE, SWAP, KNIFE, NADE, JUMP, RUN, plus BUILD, VIEW and PAUSE up top</td></tr></table>
     <h3>TIPS</h3>

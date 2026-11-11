@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { inp, took, endFrame, setupInput, setDevice, pollKeyboard, pollGamepad, rumble, touchSprint, resetDriveTouch } from './input.js';
-import { initAudio, setVolume, sfx, setEngine, setSqueal } from './audio.js';
+import { initAudio, setVolume, sfx, setEngine, setSqueal, setRain } from './audio.js';
 import { initCarFx, clearCarFx, stepCar, unstick, idleCarFx, carBlocked, roomy } from './car.js';
 import { S, GW, GH, surf, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, at, tileOf, cx, doors, windows, openZones, buildMap, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, spawnSpot, recenter, setProcProvider, ijOf, TREE, TRUNK_R, treeOff, safe, area, AREA_NAMES, windowShifts, rooms, WALL, GLASS, FENCE } from './map.js';
 import { genChunk, initProc, roadAt, furnishFixed } from './proc.js';
@@ -14,6 +14,7 @@ import { T2 } from './tex2.js';
 import { W, BOX_POOL, PAP_NAMES, makeGun } from './weapons.js';
 import { clamp, lerp, R, pick, angDiff, $ } from './util.js';
 import { buildWorld } from './world.js';
+import { makeSky } from './sky.js';
 
 // ---------------- settings ----------------
 const SET = Object.assign({ q: 'auto', sens: 1, fov: 75, vol: 0.8, inv: 0, fps: 0 }, JSON.parse(localStorage.getItem('ds_set') || '{}'));
@@ -61,6 +62,16 @@ const LW_FURN = (() => { try {
 recenter(60, 30, true);
 // night, but readable: lift the ambient and moon so the lot is visible on phones
 WD.hemi.intensity = 1.3; WD.moonL.intensity = 1.2; scene.environment = env; scene.environmentIntensity = 0.22;
+const SKY = makeSky(scene, camera, WD, renderer); SKY.update(0, 0, camera.position, {});
+const WNAME = { clear: 'Skies clearing', fog: 'Fog rolling in', rain: 'Rain starting', storm: 'Storm coming' };
+const skyHooks = { weather: k => toast(WNAME[k]), thunder: () => sfx.thunder(), driving: false };
+let clockT = 0;
+function updSky(dt) {
+  skyHooks.driving = P.driving; const ti = tileOf(P.x), tj = tileOf(P.z); SKY.indoor = inb(ti, tj) && grid[idx(ti, tj)] === FLOOR && P.y < 2;
+  SKY.update(dt, clamp((P.y - 4) / 30, 0, 1), camera.position, skyHooks); G.sightMul = SKY.sightMul;
+  setRain(SKY.indoor ? Math.max(SKY.wk.rain, SKY.wk.storm) * 0.35 : Math.max(SKY.wk.rain, SKY.wk.storm));
+  if ((clockT -= dt) <= 0) { clockT = 1; $('clock').textContent = SKY.clock() + (SKY.kind !== 'clear' ? ' · ' + SKY.kind.toUpperCase() : ''); $('bLight') && $('bLight').classList.toggle('lock', SKY.flash); }
+}
 let pixelScale = 1;
 function applyQuality() {
   const q = qual();
@@ -123,7 +134,7 @@ function updLights(dt) {
     const s = sl.src, L = sl.light; if (!s) { L.intensity = 0; continue; }
     if (want.includes(s)) sl.w = Math.min(1, sl.w + dt * 3);
     const k = s.kind === 'fire' ? (9 + Math.sin(G.t * 11 + s.i * 3) * 1.5 + R()) / 10 : 1 - (R() < s.flick * 0.05 ? 0.8 : 0);
-    L.intensity = s.base * k * sl.w;
+    L.intensity = s.base * k * sl.w * (s.kind === 'fire' ? 1 : 1 - SKY.light * 0.7);
   }
 }
 
@@ -208,7 +219,7 @@ function newGame() {
   for (const w of windows) { w.planks = 6; WD.planks[w.id].list.forEach(p => p.visible = true); }
   Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0, god: false });
   Object.assign(P, { x: startPos.x, z: startPos.z, y: 0, vy: 0, yaw: Math.PI, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, view: 'fp', ads: 0, driving: false, bleedT: 0, stepN: 0 });
-  blood.length = 0; bloodMesh.count = 0; stealthShown = -1;
+  blood.length = 0; bloodMesh.count = 0; stealthShown = -1; SKY.newGame(); clockT = 0;
   P.perks.clear(); P.guns = [makeGun('pistol')]; setVmGun();
   setPower(false);
   box.spot = 0; box.state = 'idle'; box.uses = 0; if (box.model) { WD.box.gunSlot.remove(box.model); box.model = null; } WD.box.lid.rotation.x = 0; placeBox();
@@ -689,7 +700,7 @@ function exitCar() {
 const _v = new THREE.Vector3(); let fogN = 0; const FOGL = 1;
 camera.layers.enable(0);
 function fogCull() {
-  if (++fogN % 10) return; const air = P.y > 8; const lim = 80, cx_ = camera.position.x, cz_ = camera.position.z;
+  if (++fogN % 10) return; const air = P.y > 8; const lim = Math.min(105, 1.87 / SKY.fogBase), cx_ = camera.position.x, cz_ = camera.position.z;
   scene.traverse(o => {
     if (!(o.isMesh || o.isInstancedMesh) || o.frustumCulled === false) return;
     const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere(); const bs = g.boundingSphere; if (!bs || bs.radius > 160 || o.isInstancedMesh) return;
@@ -733,6 +744,8 @@ function update(dt) {
   if (!P.driving) { P.yaw -= inp.lx; P.pitch = clamp(P.pitch - inp.ly, -1.45, 1.45); }
   if (took('view')) P.view = P.view === 'fp' ? 'tp' : 'fp';
   if (took('build') && !P.driving) toggleBuild();
+  if (took('light') || (took('rotate') && !build.on && inp.device === 'pad')) { SKY.setFlash(!SKY.flash, true); sfx.click ? sfx.click() : sfx.beep(1400); toast(SKY.flash ? 'Flashlight on' : 'Flashlight off'); }
+  updSky(dt);
   if (!inp.fire) P.semi = false;
   // movement
   if (!P.driving) {
@@ -830,9 +843,7 @@ function render(dt) {
   if (muzzleT > 0) { muzzleT -= dt; muzzle.visible = !tp; if (vmGun) { vm.updateMatrixWorld(true); vmGun.muzzle.getWorldPosition(muzzle.position); } else muzzle.position.set(vm.position.x, vm.position.y + 0.06, vm.position.z - 0.55); } else muzzle.visible = false;
   // shadows follow the player
   { const far = P.y > 8 ? 260 : 125; if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); } }
-  { // the higher you fly, the thinner the fog and the brighter the moon, so the whole map is visible from the air
-    const air = clamp((P.y - 4) / 30, 0, 1); scene.fog.density = 0.024 * (1 - air * 0.82); WD.hemi.intensity = 1.3 + air * 1.6; renderer.toneMappingExposure = 1.4 + air * 0.6; }
-  WD.moonL.position.set(P.x - 30, 60, P.z - 40); WD.moonL.target.position.set(P.x, 0, P.z);
+  // day/night, weather, flashlight, and the higher you fly the thinner the fog: sky.js (updSky runs in update)
   updateStream(camera.position.x, camera.position.z, P.y > 20, dt > 0.03 ? 3 : 6); WD.followGround(camera.position.x, camera.position.z); WD.followSky(camera.position.x, camera.position.z);
   fogCull();
   renderer.clear(); renderer.render(scene, camera);
@@ -907,6 +918,7 @@ for (const b of $('admPapSeg').children) b.onclick = () => { admPap = b.dataset.
 for (const b of $('admGuns').children) b.onclick = () => { giveGun(b.dataset.k, admPap); updHud(); admMsg('You now have the ' + gunNow().name + '.'); };
 $('admExtra').children[0].onclick = () => { for (const g of P.guns) { g.clip = g.mag; g.reserve = g.maxReserve; } P.nades = Math.max(P.nades, 4); updHud(); admMsg('Ammo and grenades refilled.'); };
 $('admExtra').children[2].onclick = () => { G.fly = !G.fly; if (!G.fly) P.vy = -0.01; admSync(); admMsg(G.fly ? 'Flight on: fly where you look. Keyboard: Space up, Ctrl or Z down, Shift fast. Phone/controller: look up or down while moving.' : 'Flight off: you drop back to the ground.'); };
+$('admWorld').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.h) { SKY.hour = +b.dataset.h; admMsg('Time set to ' + SKY.clock() + '.'); } if (b.dataset.w) { SKY.setWeather(b.dataset.w); admMsg('Weather: ' + b.dataset.w + '. It fades in over about 20 seconds.'); } clockT = 0; });
 $('admExtra').children[1].onclick = () => { G.god = !G.god; admSync(); admMsg(G.god ? 'God mode on: zombies cannot hurt you.' : 'God mode off.'); };
 $('bSetBack').onclick = () => show(back); $('bCtlBack').onclick = () => show(back);
 function syncSet() {
@@ -929,4 +941,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

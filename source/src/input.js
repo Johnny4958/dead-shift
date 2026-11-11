@@ -5,7 +5,7 @@ const press = a => inp.pressed.add(a);
 export const took = a => inp.pressed.has(a);
 export function endFrame() { inp.pressed.clear(); inp.lx = 0; inp.ly = 0; }
 
-const KEYMAP = { KeyR: 'reload', KeyF: 'use', KeyE: 'use', KeyQ: 'swap', Digit1: 'slot1', Digit2: 'slot2', Digit3: 'slot3', KeyV: 'knife', KeyG: 'grenade', KeyC: 'view', KeyB: 'build', Space: 'jump', Escape: 'pause', KeyP: 'pause', KeyT: 'rotate', KeyX: 'rotate', Tab: 'scores' };
+const KEYMAP = { KeyR: 'reload', KeyF: 'use', KeyE: 'use', KeyQ: 'swap', Digit1: 'slot1', Digit2: 'slot2', Digit3: 'slot3', KeyV: 'knife', KeyG: 'grenade', KeyC: 'view', KeyB: 'build', Space: 'jump', Escape: 'pause', KeyP: 'pause', KeyT: 'rotate', KeyX: 'rotate', KeyL: 'light', Tab: 'scores' };
 export function setupInput(canvas, ui) {
   // ---- keyboard / mouse ----
   addEventListener('keydown', e => {

@@ -212,6 +212,7 @@ export function buildWorld(scene, env, q) {
   const stars = add(new THREE.Points(starG, new THREE.PointsMaterial({ color: 0xc8d0ff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8, depthWrite: false })));
   const moon = add(new THREE.Sprite(new THREE.SpriteMaterial({ map: T.moon(), fog: false, depthWrite: false, transparent: true }))); moon.scale.set(90, 90, 1); moon.position.set(lotW / 2 - 280, 330, lotH / 2 - 400);
   // the sky goes wherever you go
+  W_.skyParts = { sky, stars, moon };
   W_.followSky = (x, z) => { sky.position.set(x, 0, z); stars.position.set(x - lotW / 2, 0, z - lotH / 2); moon.position.set(x - 280, 330, z - 400); };
 
   // ---- props ----
