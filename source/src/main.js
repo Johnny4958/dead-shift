@@ -70,7 +70,7 @@ const skyHooks = { weather: k => toast(WNAME[k]), thunder: () => sfx.thunder(), 
 let clockT = 0;
 function updSky(dt) {
   skyHooks.driving = P.driving; const ti = tileOf(P.x), tj = tileOf(P.z); SKY.indoor = inb(ti, tj) && grid[idx(ti, tj)] === FLOOR && P.y < 2;
-  SKY.update(dt, clamp((P.y - 4) / 30, 0, 1), camera.position, skyHooks); G.sightMul = SKY.sightMul;
+  SKY.update(dt, AIR.mode === 'ride' ? Math.max(clamp((P.y - 4) / 30, 0, 1), clamp(P.y / 15, 0, 1) * 0.75) : clamp((P.y - 4) / 30, 0, 1), camera.position, skyHooks); G.sightMul = SKY.sightMul;
   setRain(SKY.indoor ? Math.max(SKY.wk.rain, SKY.wk.storm) * 0.35 : Math.max(SKY.wk.rain, SKY.wk.storm));
   if ((clockT -= dt) <= 0) { clockT = 1; $('clock').textContent = SKY.clock() + (SKY.kind !== 'clear' ? ' · ' + SKY.kind.toUpperCase() : ''); $('bLight') && $('bLight').classList.toggle('lock', SKY.flash); }
 }
@@ -932,7 +932,7 @@ const AIR = { mode: null, bat: 1, drops: 3, dropT: 0, warnT: 0, noiseT: 0, fireH
 const DRONE_R = 150, DRONE_T = 75, DRONE_DROPS = 3;
 const D = { x: 0, y: 0, z: 0, yaw: 0, pitch: -0.45, vx: 0, vz: 0 };
 const H = { x: 0, z: 0, y: 0, h: 0, vx: 0, vz: 0, vy: 0, spool: 0, tilt: 0, roll: 0, home: null };
-const RIDE_ON = false; // coaster ride stays off until its stage is tested
+const RIDE_ON = true;
 const RIDE = { t: 0, v: 6, len: 1, ly: 0, lp: 0, laps: 2, cost: 250, powered: false, chkT: 0, clackT: 0 };
 const drone = (() => {
   const g = new THREE.Group(); const dk = new THREE.MeshStandardMaterial({ color: 0x24282c, roughness: 0.5, metalness: 0.4 });
