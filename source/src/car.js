@@ -6,7 +6,10 @@ import { pushOut } from './props.js';
 import { roadAt } from './proc.js';
 
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-export const CAR = { wheelbase: 2.75, vmax: 31, accel: 13.5, brake: 15, revMax: 9, grip: 12, hbGrip: 1.3, r: 0.95, off: 1.35 };
+export const CAR = { wheelbase: 2.75, vmax: 31, accel: 13.5, brake: 15, revMax: 9, grip: 12, hbGrip: 1.3, r: 0.95, off: 1.35, grass: 0.62, dirt: 0.82 };
+// the car you are driving: copy its specs (and off-road tyres) into CAR
+export function useSpec(sp, tires) { Object.assign(CAR, sp); if (tires) { CAR.grass = Math.max(sp.grass, 0.97); CAR.dirt = 1; CAR.grip = sp.grip * 1.08; } }
+function surfK(x, z) { const i = tileOf(x), j = tileOf(z); if (!inb(i, j)) return 1; const k = idx(i, j); if (at(i, j) !== OUT) return 1; const s = surf[k]; return s === 0 ? CAR.grass : s === 3 || s === 4 ? CAR.dirt : 1; }
 
 // ---- skid marks: one ring-buffer mesh ----
 const NQ = 1400;
@@ -78,14 +81,17 @@ export function stepCar(car, ctl, dt, onHit) {
   const burn = ctl.gas > 0.5 && ctl.brake > 0.5 && spd < 4; // brake-stand burnout
   car.launch = ctl.gas > 0.5 && vF < 6 && vF > -1 && !burn ? Math.min(0.9, (car.launch || 0) + dt) : (ctl.gas > 0.5 && vF < 12 && car.launch > 0 ? car.launch : 0);
   const spin = burn || (car.launch > 0 && car.launch < 0.75 && vF < 9); // wheelspin off the line
+  const sk = surfK(car.x, car.z), nos = ctl.nos ? 1 : 0; car.surfK = sk;
+  const vmax = CAR.vmax * (0.55 + 0.45 * sk) * (nos ? 1.35 : 1), acc = CAR.accel * (0.6 + 0.4 * sk) * (nos ? 2 : 1);
   let a = 0;
   if (burn) { a = -vF * 5; }
   else {
-    if (ctl.gas > 0) a += vF < -0.5 ? CAR.brake * ctl.gas : CAR.accel * ctl.gas * (1 - Math.pow(clamp(vF / CAR.vmax, 0, 1), 2)) * (spin ? 0.75 : 1);
+    if (ctl.gas > 0 || nos) a += vF < -0.5 ? CAR.brake * Math.max(ctl.gas, nos) : acc * Math.max(ctl.gas, nos) * (1 - Math.pow(clamp(vF / vmax, 0, 1), 2)) * (spin ? 0.75 : 1);
+    if (vF > vmax) a -= (vF - vmax) * 1.2; // rough ground slows you to its own top speed
     if (ctl.brake > 0) a += vF > 0.6 ? -CAR.brake * ctl.brake : (vF > -CAR.revMax ? -7 * ctl.brake : 0);
   }
   if (ctl.hb) a -= Math.sign(vF) * Math.min(Math.abs(vF) / dt, 5.5);
-  if (!ctl.gas && !ctl.brake && !ctl.hb) a -= Math.sign(vF) * Math.min(Math.abs(vF) / dt, 1.4 + spd * 0.06);
+  if (!ctl.gas && !ctl.brake && !ctl.hb && !nos) a -= Math.sign(vF) * Math.min(Math.abs(vF) / dt, 1.4 + spd * 0.06);
   vF += a * dt;
   // apply the new forward speed in world space (velocity does not turn with the body by itself)
   car.vx = fx * vF + rx * vS; car.vz = fz * vF + rz * vS;
@@ -99,7 +105,7 @@ export function stepCar(car, ctl, dt, onHit) {
   // tyres pull the velocity toward the new heading: strong grip normally, weak on the handbrake, eased while sliding on power
   const nfx = -Math.sin(car.h), nfz = -Math.cos(car.h), nrx = Math.cos(car.h), nrz = -Math.sin(car.h);
   const f2 = car.vx * nfx + car.vz * nfz; let s2 = car.vx * nrx + car.vz * nrz;
-  let grip = ctl.hb ? CAR.hbGrip : CAR.grip; if (Math.abs(s2) > 3 && !ctl.hb) grip = ctl.gas > 0.5 ? 2.6 : 4.5;
+  let grip = (ctl.hb ? CAR.hbGrip : CAR.grip) * (0.7 + 0.3 * sk); if (Math.abs(s2) > 3 && !ctl.hb) grip = ctl.gas > 0.5 ? 2.6 : 4.5;
   const s3 = s2 * Math.exp(-grip * dt); const lost = Math.abs(s2) - Math.abs(s3);
   // grip that turns sideways speed into forward speed keeps the car moving (minus some scrub)
   const f3 = Math.sign(f2 || 1) * Math.sqrt(Math.max(0, f2 * f2 + lost * lost * 0.0)) - Math.sign(f2) * lost * 0.15;

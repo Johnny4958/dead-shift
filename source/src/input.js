@@ -39,7 +39,7 @@ export function pollKeyboard() {
   inp.mx = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
   inp.my = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
   inp.up = keys.has('Space') ? 1 : 0; inp.down = keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyZ') ? 1 : 0;
-  inp.sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  inp.sprint = keys.has('ShiftLeft') || keys.has('ShiftRight'); inp.nosKey = inp.sprint;
   inp.gas = inp.my > 0 ? 1 : 0; inp.brake = inp.my < 0 ? 1 : 0; inp.hb = keys.has('Space');
 }
 
@@ -66,7 +66,7 @@ export function pollGamepad(dt) {
   inp.fire = b(7); inp.aim = b(6); inp.gas = bv(7); inp.brake = bv(6); inp.hb = b(0);
   if (b(10) && !prevBtn[10]) inp.sprintToggle = !inp.sprintToggle;
   if (Math.hypot(ax, ay) < 0.3) inp.sprintToggle = false;
-  inp.sprint = !!inp.sprintToggle;
+  inp.sprint = !!inp.sprintToggle; inp.nosKey = b(10) || b(5);
   inp.use = b(2);
   const edge = (i, a) => { if (b(i) && !prevBtn[i]) press(a); };
   edge(0, 'jump'); edge(1, 'build'); edge(2, 'use'); edge(2, 'reload'); edge(3, 'swap'); edge(5, 'knife'); edge(4, 'grenade'); edge(11, 'knife');
@@ -94,7 +94,7 @@ function setupTouch(ui) {
     for (const t of e.changedTouches) {
       const el = document.elementFromPoint(t.clientX, t.clientY);
       const btn = el && el.closest && el.closest('[data-b]');
-      if (btn) { const a = btn.dataset.b; btn.classList.add('on'); lookIds.set(t.identifier, { x: t.clientX, y: t.clientY, btn: a, el: btn }); if (a === 'fire') inp.fire = true; else if (a === 'aim') { inp.aim = !inp.aim; btn.classList.toggle('lock', inp.aim); } else if (a === 'use') { inp.use = true; press('use'); } else if (a === 'gas') inp.tGas = 1; else if (a === 'brake') inp.tBrake = 1; else if (a === 'hb') inp.hb = true; else if (a === 'sprint') { inp.sprintToggle = !inp.sprintToggle; btn.classList.toggle('lock', inp.sprintToggle); } else press(a); e.preventDefault(); continue; }
+      if (btn) { const a = btn.dataset.b; btn.classList.add('on'); lookIds.set(t.identifier, { x: t.clientX, y: t.clientY, btn: a, el: btn }); if (a === 'fire') inp.fire = true; else if (a === 'nos') inp.tNos = 1; else if (a === 'aim') { inp.aim = !inp.aim; btn.classList.toggle('lock', inp.aim); } else if (a === 'use') { inp.use = true; press('use'); } else if (a === 'gas') inp.tGas = 1; else if (a === 'brake') inp.tBrake = 1; else if (a === 'hb') inp.hb = true; else if (a === 'sprint') { inp.sprintToggle = !inp.sprintToggle; btn.classList.toggle('lock', inp.sprintToggle); } else press(a); e.preventDefault(); continue; }
       if (document.body.classList.contains('building')) { const bi = document.elementsFromPoint(t.clientX, t.clientY).find(el => el.dataset && el.dataset.bi != null); if (bi) { inp.buildSel = +bi.dataset.bi; e.preventDefault(); continue; } }
       if (driving()) { if (t.clientX > innerWidth * 0.4 && steerId === null) { steerId = t.identifier; sx0 = t.clientX; steerUses(); wheel.style.left = t.clientX + 'px'; wheel.style.top = t.clientY + 'px'; wheel.classList.add('on'); setSteer(0); } e.preventDefault(); continue; }
       if (t.clientX < innerWidth * 0.42 && moveId === null) { moveId = t.identifier; mox = t.clientX; moy = t.clientY; stick.style.left = mox + 'px'; stick.style.top = moy + 'px'; stick.classList.add('on'); knob.style.transform = 'translate(-50%,-50%)'; }
@@ -115,14 +115,14 @@ function setupTouch(ui) {
     for (const t of e.changedTouches) {
       if (t.identifier === moveId) { moveId = null; inp.mx = inp.my = 0; inp.gas = inp.brake = 0; inp.autoSprint = false; stick.classList.remove('on'); }
       if (t.identifier === steerId) { steerId = null; inp.steer = 0; wheel.classList.remove('on'); }
-      const L = lookIds.get(t.identifier); if (L) { if (L.btn === 'gas') inp.tGas = 0; if (L.btn === 'brake') inp.tBrake = 0; if (L.btn === 'hb') inp.hb = false; if (L.btn === 'fire') inp.fire = false; if (L.btn === 'use') inp.use = false; if (L.el) L.el.classList.remove('on'); lookIds.delete(t.identifier); }
+      const L = lookIds.get(t.identifier); if (L) { if (L.btn === 'gas') inp.tGas = 0; if (L.btn === 'nos') inp.tNos = 0; if (L.btn === 'brake') inp.tBrake = 0; if (L.btn === 'hb') inp.hb = false; if (L.btn === 'fire') inp.fire = false; if (L.btn === 'use') inp.use = false; if (L.el) L.el.classList.remove('on'); lookIds.delete(t.identifier); }
     }
   };
   root.addEventListener('touchstart', start, { passive: false }); root.addEventListener('touchmove', move, { passive: false });
   root.addEventListener('touchend', end); root.addEventListener('touchcancel', end);
-  addEventListener('touchstart', () => { if (inp.device !== 'touch' && !ui.playing()) setDevice('touch'); }, { passive: true });
+  addEventListener('touchstart', () => { if (inp.device !== 'touch') setDevice('touch'); }, { passive: true }); // a touch after keys/pad brings the touch controls back, also mid-game
 }
 function steerUses() { let n = +(localStorage.getItem('ds_steerN') || 0) + 1; try { localStorage.setItem('ds_steerN', n); } catch (e) {} if (n >= 4) document.body.classList.add('steerKnown'); }
 try { if (+(localStorage.getItem('ds_steerN') || 0) >= 4) document.body.classList.add('steerKnown'); } catch (e) {}
-export function resetDriveTouch() { inp.tGas = inp.tBrake = 0; inp.steer = 0; if (inp.device === 'touch') inp.hb = false; document.getElementById('steer')?.classList.remove('on'); for (const el of document.querySelectorAll('#touch .tb.on')) el.classList.remove('on'); }
+export function resetDriveTouch() { inp.tGas = inp.tBrake = inp.tNos = 0; inp.steer = 0; if (inp.device === 'touch') inp.hb = false; document.getElementById('steer')?.classList.remove('on'); for (const el of document.querySelectorAll('#touch .tb.on')) el.classList.remove('on'); }
 export function touchSprint() { return inp.device === 'touch' && (inp.sprintToggle || inp.autoSprint); }

@@ -1,4 +1,4 @@
-import asyncio, json
+import asyncio, json, sys
 from playwright.async_api import async_playwright
 # Real taps: LIGHT button toggles the flashlight; admin panel (PIN 0346) time and weather buttons work; night->day run with a round going.
 async def main():
@@ -8,7 +8,7 @@ async def main():
     for w, h in [tuple(map(int, sys.argv[1].split("x")))]:
       pg = await (await br.new_context(viewport={'width': w, 'height': h}, has_touch=True, is_mobile=True)).new_page(); errs = []
       pg.on('pageerror', lambda e: errs.append(str(e)[:200])); pg.on('console', lambda m: m.type == 'error' and errs.append(m.text[:200]))
-      await pg.goto('http://localhost:8112/index.html'); await pg.wait_for_timeout(2500)
+      await pg.goto(sys.argv[2] if len(sys.argv) > 2 else 'http://localhost:8112/index.html'); await pg.wait_for_timeout(2500)
       await pg.evaluate("document.getElementById('bPlay').click()"); await pg.wait_for_timeout(600)
       await pg.evaluate("(()=>{const b=document.getElementById('bUpright'); if(b && b.offsetParent) b.click();})()"); await pg.wait_for_timeout(600)
       r = {'start': await pg.evaluate("({clock:__ds.SKY.clock(), flash:__ds.SKY.flash})")}

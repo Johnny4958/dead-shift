@@ -3,8 +3,9 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { inp, took, endFrame, setupInput, setDevice, pollKeyboard, pollGamepad, rumble, touchSprint, resetDriveTouch } from './input.js';
 import { initAudio, setVolume, sfx, setEngine, setSqueal, setRain } from './audio.js';
-import { initCarFx, clearCarFx, stepCar, unstick, idleCarFx, carBlocked, roomy } from './car.js';
-import { S, GW, GH, surf, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, at, tileOf, cx, doors, windows, openZones, buildMap, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, spawnSpot, recenter, setProcProvider, ijOf, TREE, TRUNK_R, treeOff, safe, area, AREA_NAMES, windowShifts, rooms, WALL, GLASS, FENCE } from './map.js';
+import { initCarFx, clearCarFx, stepCar, unstick, idleCarFx, carBlocked, roomy, useSpec } from './car.js';
+import { SPECS, UPGRADES, makePickup, makeCruiser, makeUpgradeParts, showParts } from './vehicles.js';
+import { S, GW, GH, surf, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, at, tileOf, cx, doors, windows, openZones, buildMap, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, spawnSpot, recenter, setProcProvider, ijOf, TREE, TRUNK_R, treeOff, safe, area, AREA_NAMES, windowShifts, rooms, WALL, GLASS, FENCE, special } from './map.js';
 import { genChunk, initProc, roadAt, furnishFixed } from './proc.js';
 import { initStream, updateStream, readsNear, live as liveChunks, stats as streamStats } from './stream.js';
 import { pushOut } from './props.js';
@@ -173,16 +174,24 @@ function drawMinimap() {
   mm.clearRect(0, 0, w, w); mm.save(); mm.translate(w / 2, w / 2); mm.rotate(yaw); mm.imageSmoothingEnabled = false; mm.drawImage(mapImg, (mapO[0] * S - px) * PPM, (mapO[1] * S - pz) * PPM, GW * S * PPM, GH * S * PPM);
   for (const z of zombies) if (!z.dead) { const on = z.ai === 'hunt' || z.ai === 'go'; mm.fillStyle = on ? '#ff3030' : '#8a5050'; mm.beginPath(); mm.arc((z.x - px) * PPM, (z.z - pz) * PPM, on ? 4 : 3, 0, 7); mm.fill(); }
   mm.fillStyle = '#5ab0ff'; const b = WD.boxSpots[box.spot].pos; mm.fillRect((b.x - px) * PPM - 5, (b.z - pz) * PPM - 5, 10, 10);
-  mm.fillStyle = '#ffd040'; mm.fillRect((car.x - px) * PPM - 4, (car.z - pz) * PPM - 7, 8, 14);
+  for (const v of cars) { mm.fillStyle = v === car ? '#ffd040' : '#c8a040'; mm.fillRect((v.x - px) * PPM - 4, (v.z - pz) * PPM - 7, 8, 14); }
   mm.restore(); mm.fillStyle = '#fff'; mm.beginPath(); mm.moveTo(w / 2, w / 2 - 10); mm.lineTo(w / 2 - 7, w / 2 + 8); mm.lineTo(w / 2 + 7, w / 2 + 8); mm.fill();
 }
 
 // ---------------- world objects state ----------------
 const box = { spot: 0, state: 'idle', t: 0, key: null, uses: 0, cycleT: 0, model: null };
 function placeBox() { const s = WD.boxSpots[box.spot]; WD.box.group.position.set(s.pos.x, 0, s.pos.z); WD.box.group.rotation.y = s.rot; WD.boxSpots.forEach((q, i) => q.crate.visible = i !== box.spot); }
-const car = { x: 0, z: 0, h: 0, v: 0, vx: 0, vz: 0, yr: 0, steer: 0, slip: 0, squeal: 0, stuckT: 0, launch: 0 };
+// vehicles: the Mustang at the motel, a pickup truck by the chop shop, a police cruiser by the police station. `car` is the one you
+// are in (or last drove). Upgrades are bought per vehicle at the UPGRADES pad in front of the chop shop and last until the game ends.
+const newVeh = (id, mdl) => ({ id, spec: SPECS[id], mdl, upg: {}, nos: 1, turT: 0, x: 0, z: 0, h: 0, v: 0, vx: 0, vz: 0, yr: 0, steer: 0, slip: 0, squeal: 0, stuckT: 0, launch: 0, fuel: 1 });
+const cars = [newVeh('mustang', WD.car), newVeh('pickup', makePickup(env)), newVeh('cruiser', makeCruiser(env))];
+for (const v of cars) { if (v.id !== 'mustang') scene.add(v.mdl.group); v.parts = makeUpgradeParts(v.mdl, v.spec, env); }
+let car = cars[0];
 function findCarSpot() { for (const [i, j] of [[27, 12], [24, 11], [30, 14], [20, 16], [32, 8]]) { let ok = true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (!inb(i + a, j + b) || grid[idx(i + a, j + b)] !== OUT) ok = false; if (ok) return { x: cx(i), z: cx(j) }; } return { x: cx(27), z: cx(12) }; }
 const carStart = findCarSpot();
+function openSpot(list) { for (const [i, j, h] of list) { let ok = true; for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) if (!inb(i + a, j + b) || grid[idx(i + a, j + b)] !== OUT) ok = false; if (ok) return { x: cx(i), z: cx(j), h }; } return null; }
+const vehStart = { mustang: carStart, pickup: openSpot([[75, 21, Math.PI / 2], [66, 21, Math.PI / 2], [78, 23, 0], [62, 22, 0], [70, 24, 0]]) || { x: carStart.x + 8, z: carStart.z, h: 0 },
+  cruiser: openSpot([[56, 18, 0], [59, 18, 0], [53, 18, 0], [56, 21, Math.PI / 2], [50, 20, 0]]) || { x: carStart.x - 8, z: carStart.z, h: 0 } };
 const forge = { t: 0 };
 const BM = buildMats();
 const PIECES = [{ kind: 'wall', name: 'Wall', cost: 250, hp: 900, tile: BWALL }, { kind: 'door', name: 'Door', cost: 400, hp: 700, tile: BDOOR }, { kind: 'spikes', name: 'Spikes', cost: 300, hp: 1600, tile: SPIKE }];
@@ -223,7 +232,8 @@ function newGame() {
   P.perks.clear(); P.guns = [makeGun('pistol')]; setVmGun();
   setPower(false);
   box.spot = 0; box.state = 'idle'; box.uses = 0; if (box.model) { WD.box.gunSlot.remove(box.model); box.model = null; } WD.box.lid.rotation.x = 0; placeBox();
-  Object.assign(car, { x: carStart.x, z: carStart.z, h: 0, v: 0, vx: 0, vz: 0, yr: 0, steer: 0, stuckT: 0 }); setEngine(false); setSqueal(0); clearCarFx();
+  for (const v of cars) { const st = vehStart[v.id]; Object.assign(v, { x: st.x, z: st.z, h: st.h || 0, v: 0, vx: 0, vz: 0, yr: 0, steer: 0, stuckT: 0, upg: {}, nos: 1, fuel: 1 }); showParts(v.parts, v.upg); placeVeh(v); }
+  car = cars[0]; setEngine(false); setSqueal(0); clearCarFx(); $('upgPanel').classList.add('hidden');
   build.on = false; document.body.classList.remove('building', 'driving'); $('buildbar').classList.add('hidden'); $('carhud').classList.add('hidden');
   startRound(1); updHud();
 }
@@ -445,6 +455,7 @@ let flashT = 0;
 // ---------------- player ----------------
 function hurt(n) {
   if (G.god || G.state !== 'play') return;
+  if (P.driving) n *= 1 - Math.max(car.spec.armor, car.upg.armor ? 0.7 : 0);
   P.hp -= n; P.lastHit = G.t; P.bleedT = 14; sfx.hurt(); rumble(0.8, 0.5, 200); $('dmg').style.opacity = 1;
   if (P.hp <= 0) {
     if (P.perks.has('revive')) { P.perks.delete('revive'); P.hp = P.maxHp; center('SECOND WIND<small>YOU GOT BACK UP</small>', 2.5); for (const z of zombies) if (!z.dead && Math.hypot(z.x - P.x, z.z - P.z) < 5) { z.x += (z.x - P.x) * 0.8; z.z += (z.z - P.z) * 0.8; } updHud(); }
@@ -577,7 +588,8 @@ function interact(dt) {
     else if (box.state === 'ready') { txt = K() + ' Take ' + W[box.key].name; if (use) { giveGun(box.key); closeBox(); } }
     else txt = '';
   } }
-  if (!txt && near(car, 3.2)) { txt = K() + ' Drive the car'; if (use) enterCar(); }
+  if (!txt) { const v = nearVeh(3.4); if (v) { txt = K() + ' Drive the ' + v.spec.name.toLowerCase(); if (use) { car = v; enterCar(); } } }
+  if (!txt && !P.driving && Math.hypot(P.x - special.pad.x, P.z - special.pad.z) < 3.5) { const v = nearVeh(9); txt = v ? K() + ' Upgrade the ' + v.spec.name.toLowerCase() : 'Park a car on the UPGRADES pad to upgrade it'; if (use && v) openUpg(v); }
   if (!txt) txt = readables(use);
   prompt(txt || (build.on ? build.promptTxt || '' : ''));
 }
@@ -644,7 +656,7 @@ function buildReason(pc, gi, gj) {
   if (tileOf(P.x) === gi && tileOf(P.z) === gj) return 'You are standing there - step back';
   if (t !== OUT && t !== FLOOR) return t === BWALL || t === BDOOR || t === SPIKE ? 'Already built here' : 'Something is in the way';
   if (zombies.some(z => !z.dead && tileOf(z.x) === gi && tileOf(z.z) === gj)) return 'A zombie is in the way';
-  if (Math.abs(cx(gi) - car.x) < 2.6 && Math.abs(cx(gj) - car.z) < 2.6) return 'The car is in the way';
+  for (const v of cars) if (Math.abs(cx(gi) - v.x) < 2.6 && Math.abs(cx(gj) - v.z) < 2.6) return 'The car is in the way';
   if (pushOut({ x: cx(gi), z: cx(gj) }, 0.7)) return 'Something is in the way';
   if (G.points < pc.cost) return 'Need ' + pc.cost + ' points (you have ' + G.points + ')';
   return '';
@@ -687,7 +699,7 @@ function onWindowMoved() { // tile arrays slid with the player: re-lay built pie
 function removePiece(p) { const i = pieces.indexOf(p); if (i < 0) return; scene.remove(p.g); if (p.k >= 0 && inb(p.i, p.j)) { const k = idx(p.i, p.j); grid[k] = p.under; owner[k] = -1; } pieces.splice(i, 1); refreshAround(p.i, p.j); sfx.crash(0.4); G.flowDirty = true; G.mapDirty = true; }
 
 // ---------------- car ----------------
-function enterCar() { resetDriveTouch(); P.driving = true; P.carT = performance.now(); P.carStillT = 0; sfx.carDoor(); document.body.classList.add('driving'); $('carhud').classList.remove('hidden'); build.on = false; document.body.classList.remove('building'); $('buildbar').classList.add('hidden'); if (build.ghost) build.ghost.visible = false; setEngine(true, 0); }
+function enterCar() { useSpec(car.spec, car.upg.tires); document.body.classList.toggle('hasnos', !!car.upg.nos); resetDriveTouch(); P.driving = true; P.carT = performance.now(); P.carStillT = 0; sfx.carDoor(); document.body.classList.add('driving'); $('carhud').classList.remove('hidden'); build.on = false; document.body.classList.remove('building'); $('buildbar').classList.add('hidden'); if (build.ghost) build.ghost.visible = false; setEngine(true, 0); }
 function exitCar() {
   resetDriveTouch(); if (readOpen) closeRead();
   P.driving = false; sfx.carDoor(); document.body.classList.remove('driving'); $('carhud').classList.add('hidden'); setEngine(false); WD.carLight.intensity = 0;
@@ -711,27 +723,69 @@ function fogCull() {
 }
 function carCtl() {
   const t = inp.device === 'touch';
-  return { gas: t ? (inp.tGas || 0) : inp.gas, brake: t ? (inp.tBrake || 0) : inp.brake, hb: !!inp.hb, steer: t ? (inp.steer || 0) : inp.mx };
+  const c = { gas: t ? (inp.tGas || 0) : inp.gas, brake: t ? (inp.tBrake || 0) : inp.brake, hb: !!inp.hb, steer: t ? (inp.steer || 0) : inp.mx, nos: false };
+  if (car.upg.nos && (inp.tNos || inp.nosKey) && car.nos > 0.05 && !car.nosLock) c.nos = true;
+  return c;
+}
+function nearVeh(r) { let best = null, bd = r; for (const v of cars) { const d = Math.hypot(v.x - P.x, v.z - P.z); if (d < bd) { bd = d; best = v; } } return best; }
+function placeVeh(v) { const g = v.mdl.group; g.position.set(v.x, 0, v.z); g.rotation.set(0, v.h, 0); }
+// ---- upgrade shop ----
+let upgVeh = null;
+function openUpg(v) {
+  upgVeh = v; G.state = 'pause'; resetDriveTouch(); $('upgPanel').classList.remove('hidden'); renderUpg();
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+function closeUpg() { $('upgPanel').classList.add('hidden'); upgVeh = null; if (G.state === 'pause') G.state = 'play'; lastT = performance.now(); }
+function renderUpg() {
+  const v = upgVeh; if (!v) return;
+  $('upgTitle').textContent = v.spec.name.toUpperCase() + ' UPGRADES'; $('upgPts').textContent = G.points + ' points';
+  $('upgList').innerHTML = UPGRADES.map(u => '<div class="upg"><div><b>' + u.name + '</b><small>' + u.desc + '</small></div>' + (v.upg[u.id] ? '<button disabled>INSTALLED</button>' : '<button data-u="' + u.id + '"' + (G.points < u.cost ? ' class="poor"' : '') + '>' + u.cost + '</button>') + '</div>').join('');
+}
+function buyUpg(id) {
+  const v = upgVeh, u = UPGRADES.find(q => q.id === id); if (!v || !u || v.upg[id]) return;
+  if (G.points < u.cost) { sfx.deny(); toast('Not enough points'); return; }
+  addPts(-u.cost); v.upg[id] = true; showParts(v.parts, v.upg); sfx.build(); noise(v.x, v.z, 14); renderUpg(); toast(u.name + ' installed');
+}
+$('upgList').addEventListener('click', e => { const b = e.target.closest('button[data-u]'); if (b) buyUpg(b.dataset.u); });
+$('upgClose').onclick = () => closeUpg();
+// ---- roof turret: fires at the nearest zombie in front of the car ----
+const _tq = new THREE.Vector3();
+function updTurret(v, dt) {
+  const P_ = v.parts; if (!v.upg.turret) return; P_.turretFlash.material.opacity = Math.max(0, P_.turretFlash.material.opacity - dt * 14);
+  v.turT -= dt; let best = null, bd = 28;
+  for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const dx = z.x - v.x, dz = z.z - v.z, d = Math.hypot(dx, dz); if (d > bd || d < 1) continue; if (Math.abs(angDiff(v.h + Math.PI, Math.atan2(dx, dz))) > 1.3) continue; if (!losTo(v.x, v.z, z.x, z.z)) continue; bd = d; best = z; }
+  const head = P_.turretHead; const want = best ? Math.atan2(best.x - v.x, best.z - v.z) - v.h - Math.PI / 2 : 0;
+  head.rotation.y += angDiff(head.rotation.y, want + Math.PI) * Math.min(1, dt * 8);
+  if (best && v.turT <= 0) { v.turT = 0.16; P_.turretFlash.material.opacity = 1; sfx.shot(0.5, 1.1, false, 'lmg'); noise(v.x, v.z, 50); damageZombie(best, 70 + G.round * 9, false, 'turret'); }
 }
 function flipCar() { if (unstick(car)) { toast('Car back on its wheels'); sfx.carDoor(); } else toast('No clear spot nearby'); }
 function updCar(dt) {
-  const cg = WD.car.group;
+  const cg = car.mdl.group;
+  for (const v of cars) if (v !== car && v.upg.turret) v.parts.turretFlash.material.opacity = 0;
   if (P.driving) {
     if (took('flip') || (inp.device === 'kbm' && took('reload')) || (inp.device === 'pad' && took('swap'))) flipCar();
     const ctl = carCtl(); let left = dt;
     while (left > 1e-4) { const h = Math.min(left, 1 / 60); left -= h; stepCar(car, ctl, h, v => { if (v > 4) { sfx.crash(Math.min(1, v / 20)); rumble(1, 0.6, 200); } }); }
     const spd = Math.hypot(car.vx, car.vz);
-    for (const z of zombies) { if (z.dead || z.state === 'rise') continue; if (Math.hypot(z.x - car.x, z.z - car.z) < 1.9) { if (spd > 5) { sfx.splat(); damageZombie(z, 400 + spd * 120 + G.round * 40, false, 'car'); car.vx *= 0.9; car.vz *= 0.9; } else { const dx = z.x - car.x, dz = z.z - car.z, d = Math.hypot(dx, dz) || 1; z.x = car.x + dx / d * 1.9; z.z = car.z + dz / d * 1.9; } } }
+    // NOS: 3 seconds of boost, refills over 12 seconds; can't fire again until it has refilled a quarter
+    if (car.upg.nos) { if (ctl.nos) { car.nos = Math.max(0, car.nos - dt / 3); if (car.nos <= 0.05) car.nosLock = true; } else car.nos = Math.min(1, car.nos + dt / 12); if (car.nosLock && car.nos > 0.25) car.nosLock = false; }
+    car.nosFx = ctl.nos;
+    const reach = car.spec.len / 2 * 0.8 + 0.3, kill = car.upg.spikes ? 0.5 : 5;
+    for (const z of zombies) { if (z.dead || z.state === 'rise') continue; if (Math.hypot(z.x - car.x, z.z - car.z) < reach) { if (spd > kill) { sfx.splat(); damageZombie(z, (car.upg.spikes ? 900 : 400) + spd * 120 + G.round * 40, false, 'car'); if (!car.upg.spikes) { car.vx *= 0.9; car.vz *= 0.9; } } else { const dx = z.x - car.x, dz = z.z - car.z, d = Math.hypot(dx, dz) || 1; z.x = car.x + dx / d * reach; z.z = car.z + dz / d * reach; } } }
+    updTurret(car, dt);
+    for (const v of cars) if (v !== car) { const dx = car.x - v.x, dz = car.z - v.z, d = Math.hypot(dx, dz), m = 2.7; if (d < m && d > 0.01) { car.x = v.x + dx / d * m; car.z = v.z + dz / d * m; const vn = (car.vx * dx + car.vz * dz) / d; if (vn < 0) { car.vx -= vn * dx / d * 1.3; car.vz -= vn * dz / d * 1.3; } } } // parked cars are solid
     P.x = car.x; P.z = car.z;
     P.engN = (P.engN || 0) - dt; if (P.engN <= 0) { P.engN = 0.35; noise(car.x, car.z, Math.min(55, 18 + spd * 1.5 + (car.squeal || 0) * 15)); } // engine, burnouts and squeal carry
     const rev = car.launch > 0 && car.launch < 0.75 || (ctl.gas > 0.5 && ctl.brake > 0.5) ? 0.85 : Math.min(1, spd / 31 + ctl.gas * 0.12);
     setEngine(true, rev); setSqueal(car.squeal);
-    $('carhud').innerHTML = Math.round(spd * 2.237) + ' <small>MPH</small>' + (car.stuckT > 1.5 ? '<div class="stuck">Stuck? ' + (inp.device === 'touch' ? 'Tap FLIP' : inp.device === 'pad' ? 'Press TRIANGLE' : 'Press R') + '</div>' : '');
+    if (car.mdl.bar) { const ph = (G.t * 3) % 1 < 0.5; car.mdl.bar[0].color.setHex(ph ? 0xff2020 : 0x501010); car.mdl.bar[1].color.setHex(ph ? 0x101850 : 0x2040ff); }
+    car.fuel = Math.max(0.15, car.fuel - spd * dt / 400000); // fuel: a full tank lasts about 400 km of driving, and it never strands you
+    $('carhud').innerHTML = Math.round(spd * 2.237) + ' <small>MPH</small>' + (car.upg.nos ? '<div class="nosbar"><i style="width:' + Math.round(car.nos * 100) + '%"></i></div>' : '') + '<div class="fuel">FUEL ' + Math.round(car.fuel * 100) + '%</div>' + (car.stuckT > 1.5 ? '<div class="stuck">Stuck? ' + (inp.device === 'touch' ? 'Tap FLIP' : inp.device === 'pad' ? 'Press TRIANGLE' : 'Press R') + '</div>' : '');
     WD.carLight.intensity = 60; WD.carLight.position.set(car.x - Math.sin(car.h) * 2.4, 0.8, car.z - Math.cos(car.h) * 2.4); WD.carLight.target.position.set(car.x - Math.sin(car.h) * 14, 0, car.z - Math.cos(car.h) * 14);
   } else idleCarFx(dt);
   cg.position.set(car.x, 0, car.z); cg.rotation.y = car.h;
   cg.rotation.z = P.driving ? clamp(-(car.yr || 0) * car.v * 0.0035, -0.05, 0.05) : 0; // body roll in corners
-  for (const w of WD.car.wheels) { w.spin.rotation.z -= (car.launch > 0 && car.launch < 0.75 ? 25 : car.v) * dt / 0.34; if (w.front) w.w.rotation.y = car.steer * 0.9; }
+  for (const w of car.mdl.wheels) { w.spin.rotation.z -= (car.launch > 0 && car.launch < 0.75 ? 25 : car.v) * dt / 0.34; if (w.front) w.w.rotation.y = car.steer * 0.9; }
 }
 
 // ---------------- update ----------------
@@ -935,10 +989,10 @@ $('fov').oninput = e => { SET.fov = +e.target.value; baseFov(); saveSet(); };
 $('vol').oninput = e => { SET.vol = +e.target.value; setVolume(SET.vol); saveSet(); };
 
 setupInput(canvas, { canLock: () => G.state === 'play', onUnlock: () => { if (G.state === 'play' && inp.device === 'kbm') pause(); }, toast, playing: () => G.state === 'play' });
-resize(); applyQuality(); syncSet(); showBest(); placeBox(); Object.assign(car, carStart); updCar(0);
+resize(); applyQuality(); syncSet(); showBest(); placeBox(); for (const v of cars) { Object.assign(v, vehStart[v.id]); v.h = vehStart[v.id].h || 0; placeVeh(v); } updCar(0);
 $('loading').textContent = ''; $('titleHint').textContent = isTouch ? 'Plays best with your phone sideways. A PS5 controller works too.' : 'Keyboard and mouse or a PS5 controller.';
 requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

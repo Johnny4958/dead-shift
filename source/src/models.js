@@ -258,7 +258,7 @@ export function makeCar(env) {
   }
   mergeChildren(inner); for (const w of wheels) mergeChildren(w.spin);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  return { group: g, wheels };
+  return { group: g, wheels, inner };
 }
 
 // ---------------------------------------------------------------------------

@@ -30,3 +30,18 @@ https://johnny4958.github.io/dead-shift/ . Local servers: 8112 = dist (new), 811
 - Admin panel: Time/weather row (NOON, DUSK, MIDNIGHT, CLEAR, FOG, RAIN, STORM).
 - Fog culling limit follows fog density (min(105, 1.87/density)), so clear noon draws ~10% more at Main St landscape, fog draws less.
 - tests/sky.py (screens + cost + brightness per time/weather vs live), tests/skytap.py (real taps on LIGHT + admin, a day running with a round).
+
+## Stage 3: vehicles (DONE, published)
+- src/vehicles.js: SPECS (mustang, pickup, cruiser), UPGRADES (nos 2500, armor 2000, tires 1500, spikes 1750, turret 4000), makePickup,
+  makeCruiser (light bar flashes while driven, main.js car.mdl.bar), makeUpgradeParts/showParts. Off-road tyres lift the body (P.lift).
+  Cruiser turret sits on a post above the light bar (spec.turX/turLift).
+- **Shop bug cause**: not the USE code. After keyboard use the touch controls are hidden (inp.device 'kbd'), and input.js only switched back
+  to touch on a touchstart when NOT playing, so a finger mid-game could not reach USE. Fixed: any touchstart switches back to touch.
+  (veh.py also uses keys first, then taps; it now taps once to wake the touch controls.)
+- tests/veh.py (all 3 sizes): pad opens on a real USE tap, all 5 upgrades install, parts visible, close works; NOS 66->94 mph,
+  off-road tyres on grass 52->62 mph, armor 27->9 damage, spikes kill, turret kills, fuel ~420 km per tank and floors at 15%.
+- tests/vehlook.py screenshots to /home/sprite/perf/vlook (geometry checked by bounding boxes; not eyeballed).
+- perfcmp (844x390): garage same 229 calls; chop shop/police 124->152 calls, 71k->80k tris; Main St 279->308 calls, 94k->99k tris.
+
+Stages 4 (generators, crafting table, traps/mines, traders) and 5 (intro, journals, hallucinations, hordes, drone, helicopter,
+roller coaster, co-op) not started.
