@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { inp, took, endFrame, setupInput, setDevice, pollKeyboard, pollGamepad, rumble, touchSprint, resetDriveTouch } from './input.js';
-import { initAudio, setVolume, sfx, setEngine, setSqueal, setRain } from './audio.js';
+import { initAudio, setVolume, sfx, setEngine, setSqueal, setRain, setRotor } from './audio.js';
 import { initCarFx, clearCarFx, stepCar, unstick, idleCarFx, carBlocked, roomy, useSpec } from './car.js';
 import { SPECS, UPGRADES, makePickup, makeCruiser, makeUpgradeParts, showParts } from './vehicles.js';
 import { S, GW, GH, surf, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, at, tileOf, cx, doors, windows, openZones, buildMap, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, spawnSpot, recenter, setProcProvider, ijOf, TREE, TRUNK_R, treeOff, safe, area, AREA_NAMES, windowShifts, rooms, WALL, GLASS, FENCE, special } from './map.js';
@@ -240,6 +240,7 @@ function newGame() {
   box.spot = 0; box.state = 'idle'; box.uses = 0; if (box.model) { WD.box.gunSlot.remove(box.model); box.model = null; } WD.box.lid.rotation.x = 0; placeBox();
   for (const v of cars) { const st = vehStart[v.id]; Object.assign(v, { x: st.x, z: st.z, h: st.h || 0, v: 0, vx: 0, vz: 0, yr: 0, steer: 0, stuckT: 0, upg: {}, nos: 1, fuel: 1 }); showParts(v.parts, v.upg); placeVeh(v); }
   car = cars[0]; setEngine(false); setSqueal(0); clearCarFx(); $('upgPanel').classList.add('hidden');
+  airReset();
   build.on = false; document.body.classList.remove('building', 'driving'); $('buildbar').classList.add('hidden'); $('carhud').classList.add('hidden');
   startRound(1); updHud();
 }
@@ -481,6 +482,7 @@ let flashT = 0;
 function hurt(n) {
   if (G.god || G.state !== 'play') return;
   if (P.driving) n *= 1 - Math.max(car.spec.armor, car.upg.armor ? 0.7 : 0);
+  if (AIR.mode === 'drone') { AIR.hurtT = 3; AIR.hudT = 0; }
   P.hp -= n; P.lastHit = G.t; P.bleedT = 14; sfx.hurt(); rumble(0.8, 0.5, 200); $('dmg').style.opacity = 1;
   if (P.hp <= 0) {
     if (P.perks.has('revive')) { P.perks.delete('revive'); P.hp = P.maxHp; center('SECOND WIND<small>YOU GOT BACK UP</small>', 2.5); for (const z of zombies) if (!z.dead && Math.hypot(z.x - P.x, z.z - P.z) < 5) { z.x += (z.x - P.x) * 0.8; z.z += (z.z - P.z) * 0.8; } updHud(); }
@@ -488,7 +490,7 @@ function hurt(n) {
   }
 }
 function gameOver() {
-  G.state = 'over'; P.hp = 0; setEngine(false); if (document.pointerLockElement) document.exitPointerLock();
+  G.state = 'over'; P.hp = 0; setEngine(false); if (AIR.mode) { AIR.mode = null; airClass(null); drone.g.visible = false; setSqueal(0); } setRotor(0); if (document.pointerLockElement) document.exitPointerLock();
   const best = Math.max(+localStorage.getItem('ds_best') || 0, G.round); localStorage.setItem('ds_best', best);
   $('stats').innerHTML = `You made it to <b>round ${G.round}</b><br>Kills: <b>${G.kills}</b> &nbsp; Headshots: <b>${G.heads}</b><br>Points left: <b>${G.points}</b><br>Best round: <b>${best}</b>`;
   setTimeout(() => { $('hud').classList.add('hidden'); $('touch').classList.remove('live'); $('over').classList.remove('hidden'); }, 1200);
@@ -576,7 +578,7 @@ function throwNade() {
 }
 function updNades(dt) {
   for (let i = nades.length - 1; i >= 0; i--) { const n = nades[i]; n.t -= dt; n.vy -= 18 * dt; const nx = n.x + n.vx * dt, nz = n.z + n.vz * dt; const tt = at(tileOf(nx), tileOf(nz)); if (solidPlayer(tt) || tt === WIN) { n.vx *= -0.4; n.vz *= -0.4; } else { n.x = nx; n.z = nz; } n.y += n.vy * dt; if (n.y < 0.08) { n.y = 0.08; n.vy *= -0.35; n.vx *= 0.7; n.vz *= 0.7; } n.m.position.set(n.x, n.y, n.z);
-    if (n.t <= 0) { scene.remove(n.m); nades.splice(i, 1); blast(n.x, n.z, 900 + G.round * 120, 'nade'); } }
+    if (n.t <= 0 || (n.imp && n.y <= 0.081)) { scene.remove(n.m); nades.splice(i, 1); blast(n.x, n.z, 900 + G.round * 120, 'nade'); } }
 }
 function blast(x, z, dmg, how) {
   sfx.boom(); noise(x, z, 70); rumble(1, 1, 300); spriteFx(T.glow(), 0xffa040, x, 1, z, 3, 0.4, { add: true, grow: 10 }); spriteFx(T.puff(), 0x505050, x, 1.2, z, 2, 1.6, { grow: 3, vy: 0.8, op: 0.8 });
@@ -600,6 +602,7 @@ function readables(use) {
 }
 function interact(dt) {
   let txt = ''; const use = took('use'), hold = inp.use;
+  if (AIR.mode) { if (AIR.mode === 'heli') prompt(H.y < 0.6 ? K() + ' Get out' : ''); else prompt(''); return; }
   if (P.driving) { const since = (performance.now() - (P.carT || 0)) / 1000; P.carStillT = Math.abs(car.v) < 1 ? (P.carStillT || 0) + dt : 0; prompt(since < 2.5 || P.carStillT > 1.2 ? K() + ' Get out' : ''); if (use) exitCar(); return; }
   if (readOpen) { const r = readOpen.r; if (Math.hypot(r.x - P.x, r.z - P.z) > (r.r || 3) + 2 || performance.now() - readOpen.t > 12000) closeRead(); else if (use) { closeRead(); prompt(''); return; } }
   // window repair
@@ -619,6 +622,7 @@ function interact(dt) {
   if (!txt) txt = baseUse(use);
   if (!txt) { const v = nearVeh(3.4); if (v) { txt = K() + ' Drive the ' + v.spec.name.toLowerCase(); if (use) { car = v; enterCar(); } } }
   if (!txt && !P.driving && Math.hypot(P.x - special.pad.x, P.z - special.pad.z) < 3.5) { const v = nearVeh(9); txt = v ? K() + ' Upgrade the ' + v.spec.name.toLowerCase() : 'Park a car on the UPGRADES pad to upgrade it'; if (use && v) openUpg(v); }
+  if (!txt && !P.driving) txt = airInteract(use);
   if (!txt) txt = readables(use);
   prompt(txt || (build.on ? build.promptTxt || '' : ''));
 }
@@ -744,7 +748,7 @@ function exitCar() {
 const _v = new THREE.Vector3(); let fogN = 0; const FOGL = 1;
 camera.layers.enable(0);
 function fogCull() {
-  if (++fogN % 10) return; const air = P.y > 8; const lim = Math.min(105, 1.87 / SKY.fogBase), cx_ = camera.position.x, cz_ = camera.position.z;
+  if (++fogN % 10) return; const vehAir = AIR.mode === 'heli' || AIR.mode === 'ride', air = P.y > 8 && !vehAir; const lim = vehAir && P.y > 8 ? 120 : Math.min(105, 1.87 / SKY.fogBase), cx_ = camera.position.x, cz_ = camera.position.z;
   scene.traverse(o => {
     if (!(o.isMesh || o.isInstancedMesh) || o.frustumCulled === false) return;
     const g = o.geometry; if (!g.boundingSphere) g.computeBoundingSphere(); const bs = g.boundingSphere; if (!bs || bs.radius > 160 || o.isInstancedMesh) return;
@@ -922,6 +926,142 @@ function updCar(dt) {
   for (const w of car.mdl.wheels) { w.spin.rotation.z -= (car.launch > 0 && car.launch < 0.75 ? 25 : car.v) * dt / 0.34; if (w.front) w.w.rotation.y = car.steer * 0.9; }
 }
 
+// ---------------- drone, helicopter, roller coaster ----------------
+// AIR.mode: null (on foot or in a car), 'drone' (flying the camera drone while your body stays put), 'heli', 'ride' (coaster)
+const AIR = { mode: null, bat: 1, drops: 3, dropT: 0, warnT: 0, noiseT: 0, fireHeld: false, lowWarn: false, hurtT: 0 };
+const DRONE_R = 150, DRONE_T = 75, DRONE_DROPS = 3;
+const D = { x: 0, y: 0, z: 0, yaw: 0, pitch: -0.45, vx: 0, vz: 0 };
+const H = { x: 0, z: 0, y: 0, h: 0, vx: 0, vz: 0, vy: 0, spool: 0, tilt: 0, roll: 0, home: null };
+const RIDE_ON = false; // coaster ride stays off until its stage is tested
+const RIDE = { t: 0, v: 6, len: 1, ly: 0, lp: 0, laps: 2, cost: 250, powered: false, chkT: 0, clackT: 0 };
+const drone = (() => {
+  const g = new THREE.Group(); const dk = new THREE.MeshStandardMaterial({ color: 0x24282c, roughness: 0.5, metalness: 0.4 });
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.4), dk)); const props = [];
+  for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.42), dk); arm.position.set(sx * 0.15, 0, sz * 0.15); arm.rotation.y = Math.atan2(sx, sz); g.add(arm); const p = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.008, 0.035), dk); p.position.set(sx * 0.3, 0.05, sz * 0.3); g.add(p); props.push(p); }
+  const l1 = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff3020 })); l1.position.set(0, 0.02, -0.2); g.add(l1);
+  const l2 = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 4), new THREE.MeshBasicMaterial({ color: 0x30ff60 })); l2.position.set(0, 0.02, 0.2); g.add(l2);
+  g.visible = false; scene.add(g); return { g, props };
+})();
+if (WD.heli) { H.home = { x: WD.heli.group.position.x, z: WD.heli.group.position.z, h: WD.heli.group.rotation.y }; WD.heli.group.rotation.order = 'YXZ'; }
+if (WD.coaster) RIDE.len = WD.coaster.curve.getLength();
+function airUp() { return inp.device === 'pad' ? inp.gas || 0 : inp.device === 'touch' ? inp.tUp || 0 : inp.up || 0; }
+function airDown() { return inp.device === 'pad' ? inp.brake || 0 : inp.device === 'touch' ? inp.tDown || 0 : inp.down || 0; }
+function airClass(m) { document.body.classList.toggle('piloting', !!m); document.body.classList.toggle('pdrone', m === 'drone'); document.body.classList.toggle('pheli', m === 'heli'); document.body.classList.toggle('pride', m === 'ride'); $('airfx').classList.toggle('hidden', !m); }
+function airReset() {
+  AIR.mode = null; airClass(null); drone.g.visible = false; AIR.bat = 1; AIR.drops = DRONE_DROPS; setRotor(0);
+  if (H.home && WD.heli) { Object.assign(H, { x: H.home.x, z: H.home.z, y: 0, h: H.home.h, vx: 0, vz: 0, vy: 0, spool: 0, tilt: 0, roll: 0 }); WD.heli.group.position.set(H.x, 0, H.z); WD.heli.group.rotation.set(0, H.h, 0); }
+  if (WD.coaster) { RIDE.t = 0; WD.coaster.cart.position.copy(WD.coaster.curve.getPointAt(0)); }
+}
+function airStartCommon(m) { if (build.on) toggleBuild(); AIR.mode = m; airClass(m); resetDriveTouch(); inp.fire = inp.aim = false; P.ads = 0; P.speed = 0; P.sprinting = false; $('touch').querySelectorAll('.tb.lock').forEach(el => el.classList.remove('lock')); inp.sprintToggle = false; }
+function launchDrone() {
+  if (G.state !== 'play' || P.driving || AIR.mode) return;
+  if (AIR.bat < 0.25) { toast('Drone charging: ' + Math.round(AIR.bat * 100) + '%'); return; }
+  airStartCommon('drone'); Object.assign(D, { x: P.x, y: P.y + 1.8, z: P.z, yaw: P.yaw, pitch: -0.45, vx: 0, vz: 0 }); drone.g.visible = true; AIR.lowWarn = false;
+  const how = inp.device === 'touch' ? 'Left stick flies, drag right side to look. UP / DOWN for height, DROP for grenades, LAND to come back.' : inp.device === 'pad' ? 'Left stick flies, right stick looks. R2 / L2 for height, L1 drops a grenade, SQUARE lands.' : 'WASD flies, mouse looks. Space / Ctrl for height, G or click drops a grenade, F or N lands.';
+  center('DRONE UP<small>' + how + '</small>', 4); sfx.radio();
+}
+function landDrone(msg) { if (AIR.mode !== 'drone') return; AIR.mode = null; AIR.drops = DRONE_DROPS; airClass(null); drone.g.visible = false; setRotor(0); if (msg) toast(msg); }
+function droneDrop() {
+  if (AIR.drops <= 0) { toast('Drone is out of grenades - land it to reload'); return; } if (AIR.dropT > 0) return;
+  AIR.drops--; AIR.dropT = 0.7; sfx.dry();
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), new THREE.MeshStandardMaterial({ color: 0x3a4a2a, roughness: 0.6 })); scene.add(m);
+  nades.push({ m, x: D.x, y: D.y - 0.15, z: D.z, vx: D.vx, vy: 0, vz: D.vz, t: 9, imp: true });
+}
+function updDrone(dt) {
+  D.yaw -= inp.lx; D.pitch = clamp(D.pitch - inp.ly, -1.45, 0.5);
+  const sp = inp.sprint || touchSprint() ? 20 : 12, fx = -Math.sin(D.yaw), fz = -Math.cos(D.yaw), rx = Math.cos(D.yaw), rz = -Math.sin(D.yaw);
+  const ml = Math.min(1, Math.hypot(inp.mx, inp.my)), dl = Math.hypot(inp.mx, inp.my) || 1;
+  const tvx = (fx * inp.my + rx * inp.mx) / dl * ml * sp, tvz = (fz * inp.my + rz * inp.mx) / dl * ml * sp, k = Math.min(1, dt * 4);
+  D.vx += (tvx - D.vx) * k; D.vz += (tvz - D.vz) * k;
+  D.y = clamp(D.y + (airUp() - airDown()) * 7 * dt, 0.8, 60);
+  let nx = D.x + D.vx * dt, nz = D.z + D.vz * dt;
+  if (D.y < 4.2) { if (solidPlayer(at(tileOf(nx), tileOf(D.z)))) { nx = D.x; D.vx = 0; } if (solidPlayer(at(tileOf(nx), tileOf(nz)))) { nz = D.z; D.vz = 0; } const p = { x: nx, z: nz }; pushOut(p, 0.3); nx = p.x; nz = p.z; }
+  const dx = nx - P.x, dz = nz - P.z, d = Math.hypot(dx, dz); if (d > DRONE_R) { nx = P.x + dx / d * DRONE_R; nz = P.z + dz / d * DRONE_R; D.vx *= 0.5; D.vz *= 0.5; }
+  D.x = nx; D.z = nz;
+  AIR.bat -= dt / DRONE_T; AIR.dropT -= dt;
+  if (AIR.bat < 0.15 && !AIR.lowWarn) { AIR.lowWarn = true; toast('Drone battery low'); sfx.deny(); }
+  if (AIR.bat <= 0) { AIR.bat = 0; landDrone('Battery dead - the drone flew home'); return; }
+  const fire = inp.fire && !AIR.fireHeld; AIR.fireHeld = !!inp.fire;
+  if (took('drop') || took('grenade') || (fire && inp.device === 'kbm')) droneDrop();
+  if (took('use') || took('recall') || took('drone')) { landDrone('Drone landed'); return; }
+  AIR.noiseT -= dt; if (AIR.noiseT <= 0) { AIR.noiseT = 1; noise(D.x, D.z, 8); }
+  for (const p of drone.props) p.rotation.y += dt * 60;
+  drone.g.position.set(D.x, D.y, D.z); drone.g.rotation.order = 'YXZ'; drone.g.rotation.set(-Math.min(0.3, Math.hypot(D.vx, D.vz) / 20 * 0.3), D.yaw, 0);
+  setRotor(0.4 + ml * 0.6, true);
+  const sig = Math.round((1 - d / DRONE_R) * 100); AIR.hudT = (AIR.hudT || 0) - dt;
+  if (AIR.hudT <= 0) { AIR.hudT = 0.2; $('airhud').innerHTML = 'DRONE &nbsp; BAT ' + Math.round(AIR.bat * 100) + '% &nbsp; SIGNAL ' + Math.max(0, sig) + '% &nbsp; ALT ' + Math.round(D.y) + 'm &nbsp; GRENADES ' + AIR.drops + (AIR.hurtT > 0 ? '<br><b>YOU\'RE UNDER ATTACK - LAND!</b>' : sig < 12 ? '<br><b>SIGNAL WEAK</b>' : ''); }
+  P.speed = 0; P.sprinting = false;
+}
+function enterHeli() {
+  airStartCommon('heli'); H.vx = H.vz = H.vy = 0; P.y = H.y; AIR.enterT = 0.35;
+  const how = inp.device === 'touch' ? 'Left stick: push up to fly forward, left / right to turn. Hold UP to lift off, DOWN to land.' : inp.device === 'pad' ? 'Left stick flies and turns. Hold R2 to lift off, L2 to go down.' : 'W / S fly forward and back, A / D or the mouse turn. Hold Space to lift off, Ctrl to go down.';
+  center('HELICOPTER<small>' + how + ' Land and press ' + keyName('use') + ' to get out.</small>', 5);
+}
+function exitHeli() {
+  if (H.y > 0.6) { toast('Land first - hold ' + (inp.device === 'touch' ? 'DOWN' : inp.device === 'pad' ? 'L2' : 'Ctrl') + ' to go down'); return; }
+  AIR.mode = null; airClass(null); const sx = Math.cos(H.h), sz = -Math.sin(H.h); let best = null;
+  for (const s of [3.2, -3.2]) for (const f of [0, 3, -3]) { const x = H.x + sx * s + Math.sin(H.h) * f, z = H.z + sz * s + Math.cos(H.h) * f; if (!solidPlayer(at(tileOf(x), tileOf(z)))) { best = { x, z }; break; } } if (!best) best = { x: H.x + sx * 3.2, z: H.z + sz * 3.2 }
+  P.x = best.x; P.z = best.z; P.y = 0; P.vy = 0; P.yaw = H.h + Math.PI; P.pitch = 0; toast('Got out of the helicopter');
+}
+function updHeli(dt) {
+  H.spool = Math.min(1, H.spool + dt / 2.2);
+  const turn = clamp(inp.mx, -1, 1); H.h -= inp.lx * 0.6 + turn * 1.5 * dt;
+  const sp = inp.sprint || touchSprint() ? 44 : 30, fwd = H.y > 0.4 ? inp.my : 0;
+  const tvx = Math.sin(H.h) * fwd * sp, tvz = Math.cos(H.h) * fwd * sp, air = H.y > 0.4;
+  const k = Math.min(1, dt * (air ? 1.1 : 6)); H.vx += (tvx - H.vx) * k; H.vz += (tvz - H.vz) * k;
+  const climb = airUp() - airDown(); let tvy = climb * (climb > 0 ? 9 : 7); if (H.spool < 0.65) tvy = Math.min(0, tvy);
+  H.vy += (tvy - H.vy) * Math.min(1, dt * 3); H.y = clamp(H.y + H.vy * dt, 0, 140); if (H.y === 0 && H.vy < 0) H.vy = 0;
+  let nx = H.x + H.vx * dt, nz = H.z + H.vz * dt;
+  if (H.y < 5.5) { const p = { x: nx, z: nz }; collide(p, 2.4, solidCar); pushOut(p, 2.0); nx = p.x; nz = p.z; } else if (H.y < 10) { const p = { x: nx, z: nz }; pushOut(p, 1.6); nx = p.x; nz = p.z; }
+  if (dt > 0) { H.vx = (nx - H.x) / dt * 0.98 + H.vx * 0.02; H.vz = (nz - H.z) / dt * 0.98 + H.vz * 0.02; }
+  H.x = nx; H.z = nz;
+  const fsp = H.vx * Math.sin(H.h) + H.vz * Math.cos(H.h);
+  H.tilt += (clamp(fsp / 44, -1, 1) * 0.2 + (air ? fwd * 0.08 : 0) - H.tilt) * Math.min(1, dt * 3); H.roll += ((air ? -turn * 0.22 : 0) - H.roll) * Math.min(1, dt * 3);
+  const g = WD.heli.group; g.position.set(H.x, H.y, H.z); g.rotation.set(H.tilt, H.h, H.roll);
+  P.x = H.x; P.z = H.z; P.y = H.y > 0.6 ? H.y + 0.6 : 0.4; P.vy = 0; P.speed = 0; P.sprinting = false;
+  AIR.noiseT -= dt; if (AIR.noiseT <= 0) { AIR.noiseT = 0.5; noise(H.x, H.z, H.y < 25 ? 45 : 25); }
+  AIR.enterT -= dt; if (took('use') && AIR.enterT <= 0) exitHeli();
+  AIR.hudT = (AIR.hudT || 0) - dt; if (AIR.hudT <= 0 && AIR.mode === 'heli') { AIR.hudT = 0.2; $('airhud').innerHTML = 'HELICOPTER &nbsp; ALT ' + Math.round(H.y) + 'm &nbsp; ' + Math.round(Math.abs(fsp) * 2.237) + ' MPH' + (H.spool < 0.65 ? '<br>ROTOR SPINNING UP...' : H.y < 0.6 ? '<br>' + (inp.device === 'touch' ? 'Hold UP to lift off' : inp.device === 'pad' ? 'Hold R2 to lift off' : 'Hold Space to lift off') : ''); }
+}
+function coasterPowered() { if (!WD.coaster) return false; const b = special.coaster.booth, bx = cx(b.i), bz = cx(b.j); return pieces.some(p => p.kind === 'gen' && Math.hypot(p.x - bx, p.z - bz) <= 22); }
+function startRide() { airStartCommon('ride'); RIDE.t = 0; RIDE.v = 5; RIDE.ly = 0; RIDE.lp = 0; RIDE.clackT = 0; center('THE WIDOWMAKER<small>Drag to look around. Hold on.</small>', 3); }
+function endRide() { AIR.mode = null; airClass(null); setSqueal(0); const s = special.coaster.station; P.x = s.x - 1.5; P.z = s.z + 1.5; const p = { x: P.x, z: P.z }; collide(p, 0.35, solidPlayer); pushOut(p, 0.35); P.x = p.x; P.z = p.z; P.y = 0; P.vy = 0; toast('What a view. Zombies heard the ride, though.'); }
+function updRide(dt) {
+  const c = WD.coaster, cur = c.curve, u = RIDE.t % 1, tg = cur.getTangentAt(u);
+  RIDE.ly = clamp(RIDE.ly - inp.lx, -2.6, 2.6); RIDE.lp = clamp(RIDE.lp - inp.ly, -1.2, 1.0);
+  RIDE.v += -9.8 * tg.y * dt; if (tg.y > 0.05) RIDE.v = Math.max(RIDE.v, 3.2); RIDE.v = clamp(RIDE.v, 3.2, 22);
+  if (RIDE.t >= RIDE.laps - 0.08) RIDE.v = Math.max(1.5, RIDE.v - dt * 6);
+  RIDE.t += RIDE.v * dt / RIDE.len;
+  const pp = cur.getPointAt(RIDE.t % 1); c.cart.position.copy(pp); c.cart.lookAt(V3.copy(pp).add(cur.getTangentAt(RIDE.t % 1)));
+  P.x = pp.x; P.z = pp.z; P.y = pp.y + 0.3; P.vy = 0; P.speed = 0;
+  RIDE.clackT -= dt; if (RIDE.clackT <= 0 && tg.y > 0.04) { RIDE.clackT = clamp(1.6 / RIDE.v, 0.08, 0.5); sfx.dry(); }
+  setSqueal(clamp((RIDE.v - 12) / 14, 0, 0.5)); AIR.noiseT -= dt; if (AIR.noiseT <= 0) { AIR.noiseT = 1; noise(pp.x, pp.z, 35); }
+  $('airhud').innerHTML = 'THE WIDOWMAKER &nbsp; ' + Math.round(RIDE.v * 2.237) + ' MPH &nbsp; ' + Math.round(pp.y) + 'm UP';
+  if (RIDE.t >= RIDE.laps) { RIDE.t = 0; c.cart.position.copy(cur.getPointAt(0)); endRide(); }
+}
+function airInteract(use) { // prompts for things you can board, on foot
+  if (WD.heli && H.y < 0.6 && near(H, 4.6)) { const t = K() + ' Fly the helicopter'; if (use) enterHeli(); return t; }
+  if (WD.coaster && RIDE_ON) { const b = special.coaster.booth, bp = { x: cx(b.i), z: cx(b.j) }; if (near(bp, 2.8)) { if (!RIDE.powered) return 'The Widowmaker is dead. Build a generator near this booth to power it'; const t = K() + ' Ride the Widowmaker [' + RIDE.cost + ']'; if (use && buy(RIDE.cost)) startRide(); return t; } }
+  return '';
+}
+function updAir(dt) {
+  if (AIR.mode !== 'drone') { AIR.bat = Math.min(1, AIR.bat + dt / 45); }
+  AIR.hurtT = Math.max(0, AIR.hurtT - dt);
+  if (AIR.mode !== 'heli' && H.spool > 0 && WD.heli) { H.spool = Math.max(0, H.spool - dt / 6); }
+  if (WD.heli) { WD.heli.rotor.rotation.y += H.spool * 28 * dt; WD.heli.trot.rotation.x += H.spool * 40 * dt; }
+  RIDE.chkT -= dt; if (RIDE.chkT <= 0 && WD.coaster && RIDE_ON) { RIDE.chkT = 0.5; const on = coasterPowered(); if (on !== RIDE.powered) { RIDE.powered = on; WD.coasterLamp.material.color.setHex(on ? 0x30ff40 : 0x400000); if (on && Math.hypot(P.x - cx(special.coaster.booth.i), P.z - cx(special.coaster.booth.j)) < 40) toast('The Widowmaker has power'); } }
+  if (AIR.mode === 'drone') updDrone(dt);
+  else if (AIR.mode === 'heli') updHeli(dt);
+  else if (AIR.mode === 'ride') updRide(dt);
+  else { if (took('drone')) launchDrone(); setRotor(H.spool > 0.02 && WD.heli ? H.spool * clamp(1 - Math.hypot(H.x - P.x, H.z - P.z) / 120, 0, 1) : 0); }
+  if (AIR.mode === 'heli') setRotor(H.spool);
+}
+function airCam(dt) {
+  if (AIR.mode === 'drone') { camera.rotation.set(D.pitch, D.yaw, 0); camera.position.set(D.x, D.y - 0.12, D.z); }
+  else if (AIR.mode === 'heli') { const fx = Math.sin(H.h), fz = Math.cos(H.h), want = V3.set(H.x - fx * 15, H.y + 5.5, H.z - fz * 15); if (want.y < 2) want.y = 2; camera.position.lerp(want, Math.min(1, dt * 4)); camera.lookAt(H.x + fx * 10, H.y + 1.5, H.z + fz * 10); }
+  else if (AIR.mode === 'ride') { const tg = WD.coaster.curve.getTangentAt(RIDE.t % 1), p = WD.coaster.cart.position; camera.rotation.order = 'YXZ'; camera.rotation.set(Math.asin(clamp(tg.y, -1, 1)) * 0.8 + RIDE.lp, Math.atan2(-tg.x, -tg.z) + RIDE.ly, 0); camera.position.set(p.x, p.y + 1.35, p.z); }
+}
+
 // ---------------- update ----------------
 let lastT = performance.now(), fpsAcc = 0, fpsN = 0, fpsShow = 0, slowT = 0;
 function update(dt) {
@@ -929,14 +1069,14 @@ function update(dt) {
   pollKeyboard(); pollGamepad(dt); inp.sens = SET.sens; inp.invertY = !!SET.inv;
   if (took('pause')) { pause(); return; }
   // look
-  if (!P.driving) { P.yaw -= inp.lx; P.pitch = clamp(P.pitch - inp.ly, -1.45, 1.45); }
+  if (!P.driving && !AIR.mode) { P.yaw -= inp.lx; P.pitch = clamp(P.pitch - inp.ly, -1.45, 1.45); }
   if (took('view')) P.view = P.view === 'fp' ? 'tp' : 'fp';
-  if (took('build') && !P.driving) toggleBuild();
+  if (took('build') && !P.driving && !AIR.mode) toggleBuild();
   if (took('light') || (took('rotate') && !build.on && inp.device === 'pad')) { SKY.setFlash(!SKY.flash, true); sfx.click ? sfx.click() : sfx.beep(1400); toast(SKY.flash ? 'Flashlight on' : 'Flashlight off'); }
   updSky(dt);
   if (!inp.fire) P.semi = false;
   // movement
-  if (!P.driving) {
+  if (!P.driving && !AIR.mode) {
     const sprint = (inp.sprint || touchSprint()) && inp.my > 0.3 && !inp.aim && P.reloadT <= 0;
     let sp = (sprint ? 6.4 : 4.2) * (P.perks.has('stamina') ? 1.15 : 1) * (inp.aim ? 0.6 : 1);
     const ml = Math.min(1, Math.hypot(inp.mx, inp.my)); const fx_ = -Math.sin(P.yaw), fz = -Math.cos(P.yaw), rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw);
@@ -974,6 +1114,7 @@ function update(dt) {
   interact(dt);
   updBase(dt);
   updCar(dt);
+  updAir(dt);
   // health
   if (G.t - P.lastHit > 3.5 && P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.5 * dt);
   $('dmg').style.opacity = clamp(1 - P.hp / P.maxHp, 0, 1) * 0.9;
@@ -1011,8 +1152,9 @@ function update(dt) {
 
 // ---------------- camera / render ----------------
 function render(dt) {
-  const tp = P.view === 'tp' || P.driving;
-  if (P.driving) { const bx = car.x + Math.sin(car.h) * 7, bz = car.z + Math.cos(car.h) * 7; camera.position.lerp(V3.set(bx, 3.2, bz), Math.min(1, dt * 5)); camera.lookAt(car.x - Math.sin(car.h) * 4, 1, car.z - Math.cos(car.h) * 4); }
+  const tp = P.view === 'tp' || P.driving || !!AIR.mode;
+  if (AIR.mode) airCam(dt);
+  else if (P.driving) { const bx = car.x + Math.sin(car.h) * 7, bz = car.z + Math.cos(car.h) * 7; camera.position.lerp(V3.set(bx, 3.2, bz), Math.min(1, dt * 5)); camera.lookAt(car.x - Math.sin(car.h) * 4, 1, car.z - Math.cos(car.h) * 4); }
   else {
     const eye = 1.62 + P.y + Math.sin(P.bob * 2) * 0.035 * (P.speed > 0.5 ? 1 : 0);
     camera.rotation.set(P.pitch + P.recoil * 0.02, P.yaw, 0);
@@ -1021,9 +1163,9 @@ function render(dt) {
   }
   const g = gunNow(); const zoom = g && g.def.zoom && P.ads > 0.8 ? g.def.zoom : 1;
   const fov = (camera.userData.fov || SET.fov) / (1 + P.ads * 0.25) / zoom; if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
-  $('scope').style.opacity = zoom > 1 ? 1 : 0; const scoped = zoom > 1; $('cross').classList.toggle('hide', scoped || P.driving); $('cross').classList.toggle('ads', P.ads > 0.6 && !scoped);
+  $('scope').style.opacity = zoom > 1 ? 1 : 0; const scoped = zoom > 1; $('cross').classList.toggle('hide', scoped || P.driving || !!AIR.mode); $('cross').classList.toggle('ads', P.ads > 0.6 && !scoped);
   // soldier (third person)
-  soldier.wrap.visible = tp && !P.driving; if (soldier.wrap.visible) { soldier.wrap.position.set(P.x, P.y, P.z); soldier.wrap.rotation.y = P.yaw; animSoldier(soldier, G.t, P.speed, P.pitch, P.sprinting); }
+  soldier.wrap.visible = tp && !P.driving && (!AIR.mode || AIR.mode === 'drone'); if (soldier.wrap.visible) { soldier.wrap.position.set(P.x, P.y, P.z); soldier.wrap.rotation.y = P.yaw; animSoldier(soldier, G.t, P.speed, P.pitch, P.sprinting); }
   // viewmodel
   vm.visible = !tp && !build.on && !(g && g.def.zoom && P.ads > 0.8); const ads = P.ads, rl = P.reloadT > 0 ? Math.sin(Math.min(1, 1 - P.reloadT / (P.reloadMax || 1)) * Math.PI) : 0;
   const sw = P.swapT > 0 ? P.swapT / 0.4 : 0, kn = P.knifeT > 0 ? Math.sin((0.5 - P.knifeT) / 0.5 * Math.PI) : 0;
@@ -1031,9 +1173,9 @@ function render(dt) {
   vm.rotation.set(rl * 0.6 + P.recoil * 0.08 * (1 - ads * 0.85) + (P.sprinting ? -0.35 : 0) + 0.06 * (1 - ads), (P.sprinting ? 0.6 : 0) + kn * 0.8 + 0.3 * (1 - ads), rl * 0.4 + 0.12 * (1 - ads)); // hip pose: canted toward the crosshair so the gun's side shows
   if (muzzleT > 0) { muzzleT -= dt; muzzle.visible = !tp; if (vmGun) { vm.updateMatrixWorld(true); vmGun.muzzle.getWorldPosition(muzzle.position); } else muzzle.position.set(vm.position.x, vm.position.y + 0.06, vm.position.z - 0.55); } else muzzle.visible = false;
   // shadows follow the player
-  { const far = P.y > 8 ? 260 : 125; if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); } }
+  { const far = AIR.mode === 'heli' || AIR.mode === 'ride' ? (P.y > 8 ? 140 : 125) : P.y > 8 ? 260 : 125; if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); } }
   // day/night, weather, flashlight, and the higher you fly the thinner the fog: sky.js (updSky runs in update)
-  updateStream(camera.position.x, camera.position.z, P.y > 20, dt > 0.03 ? 3 : 6); WD.followGround(camera.position.x, camera.position.z); WD.followSky(camera.position.x, camera.position.z);
+  updateStream(camera.position.x, camera.position.z, AIR.mode === 'heli' || AIR.mode === 'ride' ? false : P.y > 20 || (AIR.mode === 'drone' && D.y > 20), dt > 0.03 ? 3 : 6); WD.followGround(camera.position.x, camera.position.z); WD.followSky(camera.position.x, camera.position.z);
   fogCull();
   renderer.clear(); renderer.render(scene, camera);
   if (vm.visible) { renderer.clearDepth(); renderer.render(vmScene, vmCam); }
@@ -1082,7 +1224,7 @@ function play() {
   newGame(); admOpen = false; G.state = 'play'; show(null); $('hud').classList.remove('hidden'); $('touch').classList.add('live');
   if (inp.device === 'kbm' && !isTouch) canvas.requestPointerLock?.();
 }
-function pause() { if (G.state !== 'play') return; G.state = 'pause'; inp.fire = inp.aim = false; setEngine(false); show('pause'); $('touch').classList.remove('live'); if (document.pointerLockElement) document.exitPointerLock(); }
+function pause() { if (G.state !== 'play') return; G.state = 'pause'; inp.fire = inp.aim = false; setEngine(false); setRotor(0); setSqueal(0); show('pause'); $('touch').classList.remove('live'); if (document.pointerLockElement) document.exitPointerLock(); }
 function resume() { G.state = 'play'; show(null); $('touch').classList.add('live'); lastT = performance.now(); if (P.driving) setEngine(true, 0); if (inp.device === 'kbm' && !isTouch) canvas.requestPointerLock?.(); }
 function toMenu() { G.state = 'title'; clearAll(); show('title'); $('hud').classList.add('hidden'); $('touch').classList.remove('live'); setEngine(false); showBest(); }
 function showBest() { const b = +localStorage.getItem('ds_best') || 0; $('best').textContent = b ? 'Best: round ' + b : ''; }
@@ -1153,4 +1295,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { updHorde, showIntro, nextIntro, inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { AIR, D, H, RIDE, launchDrone, landDrone, enterHeli, exitHeli, startRide, coasterPowered, drone, get WDh() { return WD.heli; }, updHorde, showIntro, nextIntro, inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

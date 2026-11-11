@@ -150,7 +150,7 @@ export function buildTown(scene, W_, M, add, q) {
   { const g = new THREE.Sprite(new THREE.SpriteMaterial({ map: T.glow(), color: 0xff2010, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); g.scale.set(26, 26, 1); g.position.set(special.wheel.x, 12, special.wheel.z + 0.6); add(g); W_.wheel.glow = g; }
   // roller coaster: closed loop with hills, on pylons
   const C0 = special.coaster; const pts = [];
-  for (let n = 0; n < 16; n++) { const a = n / 16 * Math.PI * 2; const rx = 12.5, rz = 18; pts.push(new THREE.Vector3(C0.cx + Math.cos(a) * rx * (1 + 0.15 * Math.sin(a * 3)), 4 + 3.5 * Math.max(0, Math.sin(a * 2 + 0.6)) + (n === 4 ? 6 : 0), C0.cz + Math.sin(a) * rz)); }
+  for (let n = 0; n < 16; n++) { const a = n / 16 * Math.PI * 2; const rx = 12.5, rz = 18; pts.push(new THREE.Vector3(C0.cx + Math.cos(a) * rx * (1 + 0.15 * Math.sin(a * 3)), 4 + 3.5 * Math.max(0, Math.sin(a * 2 + 0.6)) + (n === 4 ? 11 : n === 3 || n === 5 ? 3 : 0), C0.cz + Math.sin(a) * rz)); }
   const curve = new THREE.CatmullRomCurve3(pts, true, 'catmullrom', 0.5);
   const railM = std({ color: 0x8a2a1a, roughness: 0.6, metalness: 0.5, map: T.rust() });
   const trackP = [];

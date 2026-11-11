@@ -141,6 +141,17 @@ export function setSqueal(level) { // tyre squeal: a narrow band of noise plus a
   if (!squeal) return; const t = now();
   squeal.g.gain.setTargetAtTime(Math.max(0.0001, level * 0.22), t, 0.06); squeal.f.frequency.setTargetAtTime(1700 + level * 900, t, 0.1); squeal.o.frequency.setTargetAtTime(860 + level * 260, t, 0.1);
 }
+let rotor = null;
+export function setRotor(level, drone = false) { // helicopter: chopping low thump; drone: thin electric whine
+  if (!ctx) return;
+  if (!rotor && level > 0.01) { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 380; const am = ctx.createGain(); am.gain.value = 0.5; const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 10; const lg = ctx.createGain(); lg.gain.value = 0.5; lfo.connect(lg); lg.connect(am.gain);
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 190; const of = ctx.createBiquadFilter(); of.type = 'bandpass'; of.frequency.value = 700; of.Q.value = 3; const og = ctx.createGain(); og.gain.value = 0; o.connect(of); of.connect(og);
+    const g = ctx.createGain(); g.gain.value = 0.0001; s.connect(f); f.connect(am); am.connect(g); og.connect(g); g.connect(master); s.start(); lfo.start(); o.start(); rotor = { f, lfo, lg, o, og, g }; }
+  if (!rotor) return; const t = now();
+  rotor.g.gain.setTargetAtTime(Math.max(0.0001, level * (drone ? 0.09 : 0.55)), t, 0.12);
+  rotor.og.gain.setTargetAtTime(drone ? 0.6 : 0, t, 0.1); rotor.lg.gain.setTargetAtTime(drone ? 0.05 : 0.5, t, 0.1);
+  rotor.lfo.frequency.setTargetAtTime(drone ? 30 : 3 + level * 8, t, 0.25); rotor.o.frequency.setTargetAtTime(drone ? 160 + level * 90 : 60, t, 0.1); rotor.f.frequency.setTargetAtTime(drone ? 2400 : 380, t, 0.1);
+}
 let rainSrc = null;
 export function setRain(level) { // looping hiss for rain; level 0..1
   if (!ctx) return;

@@ -180,6 +180,28 @@ body.upright #rotateMsg{display:none!important}
 #rotateMsg{display:none;position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.92);align-items:center;justify-content:center;flex-direction:column;font-size:24px;font-weight:600;text-align:center;padding:30px}
 #rotateMsg .ph{width:60px;height:100px;border:4px solid #ddd;border-radius:10px;margin-bottom:20px;animation:rot 2s infinite}
 @keyframes rot{0%,30%{transform:rotate(0)}60%,100%{transform:rotate(90deg)}}
+
+.tb.plt{display:none}
+.tb[data-b=drone]{top:calc(52px + env(safe-area-inset-top));right:calc(78px + env(safe-area-inset-right))}
+body.driving .tb[data-b=drone],body.building .tb[data-b=drone]{display:none}
+body.piloting .tb:not([data-b=pause]):not(.plt){display:none}
+body.piloting .tb.plt{display:flex}
+body.piloting.pheli .tb[data-b=drop],body.piloting.pheli .tb[data-b=recall],body.piloting.pride .tb.plt{display:none}
+body.piloting.pheli .tb[data-b=use]{display:flex;right:auto;left:calc(14px + env(safe-area-inset-left));bottom:auto;top:calc(158px + env(safe-area-inset-top));width:70px;height:40px;border-radius:10px;font-size:12px}
+.tb[data-b=up]{width:80px;height:80px;right:calc(28px + env(safe-area-inset-right));bottom:calc(150px + env(safe-area-inset-bottom));font-size:16px;background:rgba(30,90,150,.5);border-color:rgba(140,200,255,.75)}
+.tb[data-b=down]{width:70px;height:70px;right:calc(33px + env(safe-area-inset-right));bottom:calc(60px + env(safe-area-inset-bottom));font-size:14px}
+.tb[data-b=drop]{width:66px;height:66px;right:calc(130px + env(safe-area-inset-right));bottom:calc(104px + env(safe-area-inset-bottom));background:rgba(150,20,20,.45);border-color:rgba(255,120,100,.6)}
+.tb[data-b=recall]{top:calc(158px + env(safe-area-inset-top));left:calc(14px + env(safe-area-inset-left))}
+@media (orientation:landscape){.tb[data-b=recall],body.piloting.pheli .tb[data-b=use]{top:calc(12px + env(safe-area-inset-top));left:calc(142px + env(safe-area-inset-left))}}
+body.piloting #ammo,body.piloting #buildbar{display:none}
+#airfx{position:absolute;inset:0;pointer-events:none}
+#airfx.hidden{display:none}
+body.pdrone #airfx{background:repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px),radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,.6))}
+#airhud{position:absolute;left:50%;transform:translateX(-50%);top:calc(56px + env(safe-area-inset-top));font:700 13px BC,Arial;color:#d8f4ff;letter-spacing:1px;text-shadow:1px 1px 0 #000;white-space:nowrap;text-align:center;background:rgba(0,0,0,.35);padding:3px 8px;border-radius:6px}
+#airhud b{color:#ff5a4a}
+#dret{display:none;position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border:2px solid rgba(200,255,220,.7);border-radius:50%}
+#dret::after{content:'';position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;background:#cfe;border-radius:50%}
+body.pdrone #dret{display:block}
 </style>
 </head>
 <body data-device="kbm">
@@ -195,6 +217,7 @@ body.upright #rotateMsg{display:none!important}
   <div id="ammo"><div id="gunName"></div><div id="clip"></div><div id="nades"></div></div>
   <div id="powerups"></div>
   <div id="prompt"></div>
+  <div id="airfx" class="hidden"><div id="airhud"></div><div id="dret"></div></div>
   <div id="readbox" class="hidden"></div>
   <div id="center"></div>
   <div id="buildbar" class="hidden"></div>
@@ -223,6 +246,11 @@ body.upright #rotateMsg{display:none!important}
   <div class="tb drv" data-b="brake">BRAKE<br>REV</div>
   <div class="tb drv" data-b="nos">NOS</div><div class="tb drv" data-b="hb">HAND<br>BRAKE</div>
   <div class="tb sq drv" data-b="flip">FLIP</div>
+  <div class="tb sq" data-b="drone">DRONE</div>
+  <div class="tb plt" data-b="up">UP</div>
+  <div class="tb plt" data-b="down">DOWN</div>
+  <div class="tb plt" data-b="drop">DROP</div>
+  <div class="tb sq plt" data-b="recall">LAND</div>
   <div id="steer"><div class="rail"></div><div id="steerKnob"></div></div>
   <div id="steerHint">Drag left / right here to steer</div>
 </div>
