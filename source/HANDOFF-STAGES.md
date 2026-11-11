@@ -66,3 +66,15 @@ roller coaster, 4-player co-op (GitHub Pages is static: co-op would need WebRTC 
 
 Stages 4 (generators, crafting table, traps/mines, traders) and 5 (intro, journals, hallucinations, hordes, drone, helicopter,
 roller coaster, co-op) not started.
+
+## Round: drone, helicopter, coaster, atmosphere (Nov 10-11, 2026) - ALL LIVE
+Live commits on Johnny4958/dead-shift: "Drone and helicopter", "Roller coaster ride (generator powered)", "Atmosphere: story logs, hallucinations, ghostly echoes".
+Code: src/main.js block "drone, helicopter, roller coaster" (AIR, D, H, RIDE; updAir/airCam/airInteract) and block "story logs, hallucinations, ghostly echoes" (HAUNT, logs, updHaunt, haunt()). Story text lives in src/lore.js (LOGS, ECHOES, WHISPERS). Audio: setRotor(), sfx.whisper/steps/wail/heart/tapeOn in audio.js. SKY.flicker (sky.js) flickers the flashlight.
+- Drone: DRONE button (touch), N key, controller Select/Back (button 8, was Tab-scoreboard edge). 150 m leash, 75 s battery, recharges in 45 s, needs 25% to launch, 3 grenades that burst on impact (nades with imp:true), reload when landed. Body stays put; HUD warns if you're hit.
+- Helicopter: existing army-base heli at Fort Calder pad (~[69,201]). USE to board. Touch UP/DOWN buttons, keyboard Space/Ctrl, controller R2/L2 for height; stick/WASD forward+turn. Can't get out above 0.6 m. Fog/stream far plane capped (140) while in heli/coaster to keep draw cost down.
+- Coaster "The Widowmaker": booth at special.coaster.booth (~[165,135]); needs a player-built generator within 22 m (coasterPowered). Costs 250 points, 2 laps, then drops you at the station. RIDE_ON flag in main.js.
+- Atmosphere: 10 story logs (journals + tapes read aloud with speechSynthesis), saved in localStorage ds_logs. Hallucinations: phantom figure that vanishes when looked at, footsteps + whisper, wail + flashlight flicker, heartbeat red pulse. Rate rises at night, fog, graveyard, low health. 5 ghostly echoes, once per game. Admin HAUNT NOW button.
+Tests: tests/drone.py, heli.py, ride.py, atmos.py (arg WxH [url]); tests/aircost.py (draw cost in air); airlib.py helpers.
+Perf (844x390, perfcmp NEW): garage 233, chop/police 155, Main Street 303, carnival edge 160, mall 23 calls. Heli 40 m up over Main St ~187 calls; coaster top ~ see aircost.
+## Co-op (stage 5) - NOT BUILT, plan only
+PeerJS cloud (0.peerjs.com) is free signaling; WebRTC data channels phone-to-phone. Some networks (symmetric NAT, often cell data) need a TURN relay, which PeerJS doesn't provide. Plan: host-authoritative (host runs zombies/rounds/points; clients send input + position 15-20x/s; host sends zombie snapshots ~10x/s); lobby with 4-letter room code; remote players drawn with soldier model; shared rounds, separate points, revive downed players. Phases: (1) lobby + see each other walk, (2) shared zombies/rounds, (3) guns/damage/points, (4) cars, base pieces, survivors, air vehicles. Phase 1-3 is one big round on its own.
