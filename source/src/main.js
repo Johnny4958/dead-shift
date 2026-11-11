@@ -76,6 +76,7 @@ function resize() {
   const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false);
   canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
   camera.aspect = vmCam.aspect = w / h; baseFov();
+  vmCam.fov = w / h < 1 ? 2 * Math.atan(Math.tan(Math.PI / 6) * Math.min(2, 0.92 / (w / h))) * 180 / Math.PI : 60; // keep the gun from filling an upright screen
   vmCam.updateProjectionMatrix();
 }
 function baseFov() { const a = camera.aspect; camera.userData.fov = a < 1 ? Math.min(100, SET.fov * 1.3) : SET.fov; }
@@ -752,9 +753,9 @@ function render(dt) {
   // viewmodel
   vm.visible = !tp && !build.on && !(g && g.def.zoom && P.ads > 0.8); const ads = P.ads, rl = P.reloadT > 0 ? Math.sin(Math.min(1, 1 - P.reloadT / (P.reloadMax || 1)) * Math.PI) : 0;
   const sw = P.swapT > 0 ? P.swapT / 0.4 : 0, kn = P.knifeT > 0 ? Math.sin((0.5 - P.knifeT) / 0.5 * Math.PI) : 0;
-  const sightY = vmGun ? vmGun.sight : 0.095; vm.position.set(lerp(0.17, 0, ads) + kn * -0.1, lerp(-0.19, -sightY, ads) - rl * 0.12 - sw * 0.3 + Math.sin(P.bob * 2) * 0.008 * (1 - ads), lerp(-0.38, -0.27, ads) + P.recoil * 0.05 - kn * 0.15);
-  vm.rotation.set(rl * 0.6 + P.recoil * 0.08 * (1 - ads * 0.85) + (P.sprinting ? -0.35 : 0), (P.sprinting ? 0.6 : 0) + kn * 0.8, rl * 0.4);
-  if (muzzleT > 0) { muzzleT -= dt; muzzle.visible = !tp; muzzle.position.set(vm.position.x, vm.position.y + (vmGun ? vmGun.muzzle.position.y : 0.06), vm.position.z + (vmGun ? vmGun.muzzle.position.z : -0.55)); } else muzzle.visible = false;
+  const sightY = vmGun ? vmGun.sight : 0.095; vm.position.set(lerp(0.2, 0, ads) + kn * -0.1, lerp(-0.19, -sightY, ads) - rl * 0.12 - sw * 0.3 + Math.sin(P.bob * 2) * 0.008 * (1 - ads), lerp(-0.38, -0.27, ads) + P.recoil * 0.05 - kn * 0.15);
+  vm.rotation.set(rl * 0.6 + P.recoil * 0.08 * (1 - ads * 0.85) + (P.sprinting ? -0.35 : 0) + 0.06 * (1 - ads), (P.sprinting ? 0.6 : 0) + kn * 0.8 + 0.3 * (1 - ads), rl * 0.4 + 0.12 * (1 - ads)); // hip pose: canted toward the crosshair so the gun's side shows
+  if (muzzleT > 0) { muzzleT -= dt; muzzle.visible = !tp; if (vmGun) { vm.updateMatrixWorld(true); vmGun.muzzle.getWorldPosition(muzzle.position); } else muzzle.position.set(vm.position.x, vm.position.y + 0.06, vm.position.z - 0.55); } else muzzle.visible = false;
   // shadows follow the player
   { const far = P.y > 8 ? 260 : 125; if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); } }
   { // the higher you fly, the thinner the fog and the brighter the moon, so the whole map is visible from the air
@@ -856,4 +857,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, car, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

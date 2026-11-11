@@ -49,3 +49,14 @@ Read after HANDOFF-INFINITE.md. This round finished the car, build mode, Lockwoo
 - Tests: tests/square.json (closed 5x5 ring + door, 1440 rays per height, 0 gaps), tests/buildsnap.json (real touch taps build an L + door +
   spikes), tests/carhud.json (prompt timing, overlap check of USE/FLIP against every visible HUD element).
 - Next per plan: Mustang + first-person gun models (check the Patrol .45 shows its detailed model), then smart zombies, day/night, vehicles, base.
+
+## Checkpoint: Looks (Mustang + first-person guns)
+- makeCar (models.js) rebuilt as a '69-'70 Mach 1 fastback: rounder bevelled body, curved roofline, tumblehome (every part is baked into
+  `inner` space then the upper body/roof is tucked in and the nose pinched), blacked-out hood + shaker scoop + hood pins, recessed grille with
+  quad headlights and chrome bezels, chin spoiler, triple-bar tail lights on a black panel, centre gas cap, ducktail, plate, twin exhausts,
+  quarter scoops, mirrors, handles, rocker stripe, arch lips, interior seats/dash/wheel, Magnum 500 style wheels with white-letter tyres.
+  Same 8 materials, 23 meshes, ~6.7k tris. Not eyeballed (no image viewer); tests/looks.json saves car-34.png / car-rear.png in perf/run-shots.
+- First-person: guns were the detailed models already (pistol 1680 verts) but seen straight from behind, so they read as blocks. Hip pose now
+  cants the gun (yaw 0.3, roll 0.12, pitch 0.06, fades to 0 in ADS so sights are unchanged); muzzle flash uses the muzzle's world position.
+  Upright screens: vmCam fov widens (gun went from ~98% to ~49% of screen width). aim.py: all 11 guns 6/6 ADS.
+- Next: stage 2 smart zombies (sight / sound: gunshots + engine / blood trail, lose you when hidden), then day/night, vehicles, base.
