@@ -78,3 +78,13 @@ Tests: tests/drone.py, heli.py, ride.py, atmos.py (arg WxH [url]); tests/aircost
 Perf (844x390, perfcmp NEW): garage 233, chop/police 155, Main Street 303, carnival edge 160, mall 23 calls. Heli 40 m up over Main St ~187 calls; coaster top ~ see aircost.
 ## Co-op (stage 5) - NOT BUILT, plan only
 PeerJS cloud (0.peerjs.com) is free signaling; WebRTC data channels phone-to-phone. Some networks (symmetric NAT, often cell data) need a TURN relay, which PeerJS doesn't provide. Plan: host-authoritative (host runs zombies/rounds/points; clients send input + position 15-20x/s; host sends zombie snapshots ~10x/s); lobby with 4-letter room code; remote players drawn with soldier model; shared rounds, separate points, revive downed players. Phases: (1) lobby + see each other walk, (2) shared zombies/rounds, (3) guns/damage/points, (4) cars, base pieces, survivors, air vehicles. Phase 1-3 is one big round on its own.
+## Sharpness fix (DONE, published)
+Cause: phones rendered the 3D scene at pixel ratio 1.25 max (AUTO = LOW cap), no antialias on touch, and the AUTO fps check (fps<35 for 3 s,
+clamped dt) cut pixelScale by 0.15 per step down to ~0.65 and never raised it. A 30 fps cap or heavy helicopter/coaster seconds triggered it.
+Fix (src/main.js): antialias on for all; resCap(): AUTO phone with DPR>=2.5 -> 2, other phones 1.5, desktop 1.5, High 2, Med 1.5, Low 1.25.
+applyRes() only touches pixel ratio (no texture re-upload). fpsTick(raw): real frame time, skips hitch windows, <27 fps 3 s -> -10%,
+>=50 fps 4 s -> +10%, floor 1.25 on phones (AUTO). Helicopter mode = 0.8x (still >= floor). window.__fixedRes=true freezes it for tests.
+Anisotropy 4 on AUTO phones. __ds.fpsTick / __ds.resInfo exposed.
+Guns: makeArms(grip, fore) builds gloved hands that wrap each gun's grip (GRIP / FORE tables in guns.js), pistol hold for pistol/brawler.
+Patrol .45 detail: ejection port, serrations, top rib, slide stop, safety, beavertail, mag release, grip screws, night sights; bluing lighter.
+vmScene.environment = env so first-person guns get reflections. Tests: tests/sharp.py, tests/hands.py, tests/qcheck.py, tests/pr.py.

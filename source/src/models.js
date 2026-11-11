@@ -152,14 +152,46 @@ function makeGunOld(key, pap) {
   return { group: g, muzzle };
 }
 // first-person arms (sleeves + gloves) holding the gun
-export function makeArms() {
-  const sleeve = std({ map: T.camo(), roughness: 0.9 }), glove = std({ color: 0x1c1c1c, roughness: 0.7 });
+// First-person arms: gloved hands that wrap the gun's grip (fingers, thumb, index along the frame) and a support hand that
+// either cups the pistol grip (pistol, revolver) or holds the handguard. grip = [yTop, fTop, yBottom, fBottom] of the grip's
+// front edge, fore = [forward, bottom y, half width] of the handguard or null for a two-handed pistol hold. 2 draw calls.
+export function makeArms(grip = [0.03, 0.014, -0.092, 0.0], fore = [0.2, 0.028, 0.029]) {
+  const M = once('armMats', () => ({ sleeve: std({ map: T.camo(), roughness: 0.9 }), glove: std({ color: 0x2b2926, roughness: 0.72, metalness: 0.05 }) }));
+  const parts = { sleeve: [], glove: [] };
+  const up = new THREE.Vector3(0, 1, 0), va = new THREE.Vector3(), vb = new THREE.Vector3(), q = new THREE.Quaternion(), m4 = new THREE.Matrix4(), sc = new THREE.Vector3(1, 1, 1);
+  const limb = (a, b, r, k, seg = 8) => { va.set(...a); vb.set(...b); const d = vb.clone().sub(va); const len = Math.max(0.001, d.length()); q.setFromUnitVectors(up, d.normalize());
+    const g = new THREE.CapsuleGeometry(r, len, 3, seg); m4.compose(va.clone().add(vb).multiplyScalar(0.5), q, sc); g.applyMatrix4(m4); parts[k].push(g); };
+  const blob = (c, rad, k) => { const g = new THREE.SphereGeometry(1, 12, 9); m4.compose(new THREE.Vector3(...c), q.identity(), new THREE.Vector3(...rad)); g.applyMatrix4(m4); parts[k].push(g); };
+  const [yT, fT, yB, fB] = grip, L = Math.max(0.05, yT - yB);
+  const fAt = y => fT + (fB - fT) * (yT - y) / L; // grip front edge (forward) at height y
+  const fy = [0.42, 0.62, 0.82].map(t => yT - L * t);
+  // right hand: three fingers round the front strap, palm on the back and right side, thumb on the left, index straight along the frame
+  for (const y of fy) limb([-0.022, y, -fAt(y) - 0.007], [0.021, y, -fAt(y) - 0.005], 0.0095, 'glove');
+  blob([0.012, yT - L * 0.45, -fAt(yT - L * 0.45) + 0.035], [0.02, L * 0.45, 0.038], 'glove');
+  limb([-0.021, yT - 0.004, -fT + 0.045], [-0.021, yT - 0.002, -fT + 0.006], 0.0085, 'glove');
+  limb([0.02, yT + 0.002, -fT + 0.012], [0.02, yT + 0.002, -fT - 0.038], 0.008, 'glove');
+  const rw = [0.016, yT - L * 0.75, -fAt(yT - L * 0.75) + 0.06];
+  limb(rw, [rw[0] + 0.01, rw[1] - 0.02, rw[2] + 0.05], 0.03, 'glove');
+  limb([rw[0] + 0.01, rw[1] - 0.02, rw[2] + 0.06], [0.075, -0.24, 0.42], 0.044, 'sleeve', 10);
+  if (!fore) { // support hand cups the shooting hand
+    for (const y of fy) limb([-0.03, y, -fAt(y) - 0.024], [0.017, y, -fAt(y) - 0.022], 0.0095, 'glove');
+    blob([-0.031, yT - L * 0.5, -fAt(yT - L * 0.5) + 0.02], [0.016, L * 0.42, 0.033], 'glove');
+    limb([-0.025, yT - 0.014, -fT + 0.012], [-0.025, yT - 0.012, -fT - 0.038], 0.0085, 'glove');
+    const lw = [-0.036, yT - L * 0.8, -fAt(yT - L * 0.8) + 0.035];
+    limb(lw, [lw[0] - 0.02, lw[1] - 0.02, lw[2] + 0.045], 0.03, 'glove');
+    limb([lw[0] - 0.02, lw[1] - 0.02, lw[2] + 0.055], [-0.14, -0.25, 0.4], 0.042, 'sleeve', 10);
+  } else { // support hand under the handguard, fingers up the right side, thumb along the left
+    const [F, Yb, hw] = fore;
+    blob([0, Yb - 0.012, -F], [hw + 0.002, 0.016, 0.046], 'glove');
+    for (const dz of [-0.022, 0, 0.022]) limb([hw + 0.002, Yb - 0.008, -F + dz], [hw - 0.002, Yb + 0.02, -F + dz], 0.0085, 'glove');
+    limb([-hw - 0.002, Yb + 0.012, -F + 0.03], [-hw - 0.002, Yb + 0.014, -F - 0.028], 0.0085, 'glove');
+    const lw = [-0.012, Yb - 0.024, -F + 0.045];
+    limb(lw, [lw[0] - 0.02, lw[1] - 0.015, lw[2] + 0.05], 0.03, 'glove');
+    limb([lw[0] - 0.02, lw[1] - 0.015, lw[2] + 0.06], [-0.17, -0.21, 0.14], 0.042, 'sleeve', 10);
+  }
   const g = new THREE.Group();
-  const r = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.32, 3, 8), sleeve); r.rotation.x = Math.PI / 2 - 0.25; r.position.set(0.03, -0.09, 0.22); g.add(r);
-  const rh = new THREE.Mesh(B(0.07, 0.08, 0.1), glove); rh.position.set(0, -0.03, 0.03); g.add(rh);
-  const l = new THREE.Mesh(new THREE.CapsuleGeometry(0.042, 0.36, 3, 8), sleeve); l.rotation.set(Math.PI / 2 - 0.2, 0, -0.45); l.position.set(-0.11, -0.08, 0.0); g.add(l);
-  const lh = new THREE.Mesh(B(0.07, 0.07, 0.1), glove); lh.position.set(-0.02, 0.0, -0.17); g.add(lh);
-  return { group: g, leftHand: lh, leftArm: l };
+  for (const k of ['sleeve', 'glove']) { const geo = mergeGeometries(parts[k].map(x => { const y = x.index ? x.toNonIndexed() : x; for (const a of Object.keys(y.attributes)) if (a !== 'position' && a !== 'normal' && a !== 'uv') y.deleteAttribute(a); return y; }), false); g.add(new THREE.Mesh(geo, M[k])); }
+  return { group: g, dispose() { for (const c of g.children) c.geometry.dispose(); } };
 }
 
 // ---------------------------------------------------------------------------

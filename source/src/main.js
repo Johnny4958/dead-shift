@@ -28,7 +28,8 @@ const qual = () => SET.q === 'auto' ? (isTouch ? 'low' : 'medium') : SET.q;
 
 // ---------------- renderer / scene ----------------
 const canvas = $('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isTouch, powerPreference: 'high-performance' });
+// antialias on for every device: phones used to get none, which left stair-stepped edges (MSAA is cheap on phone GPUs)
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.4;
 renderer.autoClear = false;
@@ -39,7 +40,7 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 300); camera.rotation.order = 'YXZ';
 const vmScene = new THREE.Scene(); const vmCam = new THREE.PerspectiveCamera(60, 1, 0.01, 10);
-vmScene.add(new THREE.HemisphereLight(0xb0b8d0, 0x302820, 1.4)); const vmDir = new THREE.DirectionalLight(0xffe0c0, 1.2); vmDir.position.set(1, 2, 1); vmScene.add(vmDir);
+vmScene.add(new THREE.HemisphereLight(0xb0b8d0, 0x302820, 1.4)); vmScene.environment = env; vmScene.environmentIntensity = 0.75; const vmDir = new THREE.DirectionalLight(0xffe0c0, 1.2); vmDir.position.set(1, 2, 1); vmScene.add(vmDir);
 
 buildMap();
 const WD = buildWorld(scene, env, qual());
@@ -75,16 +76,30 @@ function updSky(dt) {
   setRain(SKY.indoor ? Math.max(SKY.wk.rain, SKY.wk.storm) * 0.35 : Math.max(SKY.wk.rain, SKY.wk.storm));
   if ((clockT -= dt) <= 0) { clockT = 1; $('clock').textContent = SKY.clock() + (SKY.kind !== 'clear' ? ' · ' + SKY.kind.toUpperCase() : ''); $('bLight') && $('bLight').classList.toggle('lock', SKY.flash); }
 }
-let pixelScale = 1;
+// ---- render resolution ----
+// The 3D scene is drawn at (screen pixels x pixel ratio). It used to be capped at 1.25 on phones (AUTO = LOW), and the auto
+// frame-rate check then shrank it in 15% steps down to ~0.7 whenever fps sat under 35 for 3 s (a 30 fps Low Power Mode cap or
+// a few heavy seconds was enough) and never raised it again: the blocky, stretched look. Now AUTO on a high-res phone draws at
+// up to 2x, the dynamic scale recovers when fps is good, never drops below the old 1.25, and ignores 30 fps caps and hitches.
+const hiDPR = (devicePixelRatio || 1) >= 2.5; // iPhone Pro / Pro Max and other sharp phones report 3
+function resCap() { const q = SET.q; return q === 'high' ? 2 : q === 'medium' ? 1.5 : q === 'low' ? 1.25 : isTouch ? (hiDPR ? 2 : 1.5) : 1.5; }
+let pixelScale = 1, resAir = 1, resNow = 0;
+const resFloor = (cap) => SET.q === 'auto' ? Math.min(cap, isTouch ? 1.25 : 1) : cap;
+const minScale = () => { const cap = Math.min(devicePixelRatio || 1, resCap()); return Math.max(0.6, resFloor(cap) / cap); };
+function applyRes() {
+  const dpr = devicePixelRatio || 1, cap = Math.min(dpr, resCap());
+  const floor = resFloor(cap);
+  const r = Math.round(Math.max(floor, cap * pixelScale * resAir) * 100) / 100;
+  if (r !== resNow) { resNow = r; renderer.setPixelRatio(r); }
+}
 function applyQuality() {
   const q = qual();
-  const dpr = Math.min(devicePixelRatio || 1, q === 'high' ? 2 : q === 'medium' ? 1.5 : 1.25);
-  renderer.setPixelRatio(dpr * pixelScale);
+  resNow = 0; applyRes();
   renderer.shadowMap.enabled = q !== 'low';
   WD.moonL.castShadow = q !== 'low';
   if (q !== 'low') { const s = q === 'high' ? 2048 : 1024; WD.moonL.shadow.mapSize.set(s, s); const c = WD.moonL.shadow.camera; c.left = c.bottom = -30; c.right = c.top = 30; c.near = 1; c.far = 250; c.updateProjectionMatrix(); }
-  setAniso(q === 'low' ? 2 : q === 'medium' ? 4 : 8);
-  $('qInfo').textContent = 'Graphics now: ' + q.toUpperCase() + (SET.q === 'auto' ? ' (auto picks LOW on phones, MED on computers)' : '');
+  setAniso(q === 'low' ? (SET.q === 'auto' ? 4 : 2) : q === 'medium' ? 4 : 8);
+  $('qInfo').textContent = 'Graphics now: ' + q.toUpperCase() + ' at ' + resNow.toFixed(2) + 'x resolution' + (SET.q === 'auto' ? (isTouch ? ' (auto: LOW detail, sharp resolution on phones)' : ' (auto picks MED on computers)') : '');
 }
 function resize() {
   const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false);
@@ -119,8 +134,10 @@ setProcProvider(genChunk);
 const startPos = { x: cx(11), z: cx(10) }; // you wake up in the motel garage
 
 // viewmodel
-const vm = new THREE.Group(); vmScene.add(vm); const arms = makeArms(); vm.add(arms.group); let vmGun = null;
-function setVmGun() { if (vmGun) vm.remove(vmGun.group); const g = P.guns[P.cur]; vmGun = g ? gunModel(g.key, g.pap) : null; if (vmGun) vm.add(vmGun.group); if (soldierGun) soldier.hand.remove(soldierGun.group); soldierGun = g ? gunModel(g.key, g.pap) : null; if (soldierGun) soldier.hand.add(soldierGun.group); updHud(); }
+const vm = new THREE.Group(); vmScene.add(vm); let arms = makeArms(); vm.add(arms.group); let vmGun = null;
+function setVmGun() { if (vmGun) vm.remove(vmGun.group); const g = P.guns[P.cur]; vmGun = g ? gunModel(g.key, g.pap) : null; if (vmGun) vm.add(vmGun.group);
+  if (vmGun && vmGun.grip) { vm.remove(arms.group); arms.dispose(); arms = makeArms(vmGun.grip, vmGun.fore); vm.add(arms.group); } /* hands wrap this gun's grip */
+  if (soldierGun) soldier.hand.remove(soldierGun.group); soldierGun = g ? gunModel(g.key, g.pap) : null; if (soldierGun) soldier.hand.add(soldierGun.group); updHud(); }
 const soldier = makeSoldier(); scene.add(soldier.wrap); soldier.wrap.visible = false; let soldierGun = null;
 
 // bodies stay on the ground this long before sinking away; capped so big rounds stay smooth
@@ -1143,7 +1160,18 @@ function updHaunt(dt) {
 function hauntReset() { HAUNT.t = 90; HAUNT.echoSeen.clear(); HAUNT.ghost = null; ghostMesh.visible = false; HAUNT.textT = 0; $('haunt').classList.remove('on'); stopTape(); }
 
 // ---------------- update ----------------
-let lastT = performance.now(), fpsAcc = 0, fpsN = 0, fpsShow = 0, slowT = 0;
+let lastT = performance.now(), fpsAcc = 0, fpsN = 0, fpsShow = 0, slowT = 0, fastT = 0, fpsHitch = false;
+// dynamic resolution (AUTO only): real frame times, a window with a hitch (shader compile, tab switch, tape loading) is skipped.
+// Under 27 fps for 3 s steps down 10%; 50+ fps for 4 s steps back up. A 30 fps cap (iPhone Low Power Mode) changes nothing.
+function fpsTick(raw) {
+  fpsAcc += raw; fpsN++; if (raw > 0.25) fpsHitch = true;
+  if (fpsAcc < 1) return;
+  fpsShow = Math.round(fpsN / fpsAcc); const hitch = fpsHitch; fpsAcc = 0; fpsN = 0; fpsHitch = false; $('fps').textContent = fpsShow + ' FPS';
+  if (G.state !== 'play' || SET.q !== 'auto' || hitch || window.__fixedRes) { slowT = fastT = 0; return; }
+  if (fpsShow < 27) { slowT++; fastT = 0; } else if (fpsShow >= 50) { fastT++; slowT = 0; } else slowT = fastT = 0;
+  if (slowT >= 3 && pixelScale > minScale() + 0.001) { pixelScale = Math.max(minScale(), pixelScale - 0.1); applyRes(); slowT = 0; }
+  if (fastT >= 4 && pixelScale < 1) { pixelScale = Math.min(1, pixelScale + 0.1); applyRes(); fastT = 0; }
+}
 function update(dt) {
   G.t += dt;
   pollKeyboard(); pollGamepad(dt); inp.sens = SET.sens; inp.invertY = !!SET.inv;
@@ -1264,8 +1292,9 @@ function render(dt) {
 }
 function loop(now) {
   requestAnimationFrame(loop);
-  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
-  fpsAcc += dt; fpsN++; if (fpsAcc > 1) { fpsShow = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; $('fps').textContent = fpsShow + ' FPS'; if (G.state === 'play' && SET.q === 'auto') { if (fpsShow < 35) slowT++; else slowT = 0; if (slowT >= 3 && pixelScale > 0.6) { pixelScale -= 0.15; applyQuality(); slowT = 0; } } }
+  const raw = Math.max(0, (now - lastT) / 1000), dt = Math.min(0.05, raw); lastT = now;
+  fpsTick(raw);
+  { const ra = AIR.mode === 'heli' ? 0.8 : 1; if (ra !== resAir) { resAir = ra; applyRes(); } } // the helicopter is the heaviest view: 20% fewer pixels only while flying it
   if (G.state === 'play') update(dt);
   else if (G.state === 'over') { G.t += dt; updFx(dt); for (const z of zombies) updZombie(z, dt, P.x, P.z); }
   if (G.state === 'play' || G.state === 'over' || G.state === 'pause') render(G.state === 'pause' ? 0 : dt);
@@ -1377,4 +1406,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { solidPlayer, HAUNT, logs, logFound, haunt, ghostMesh, ECHOES, AIR, D, H, RIDE, launchDrone, landDrone, enterHeli, exitHeli, startRide, coasterPowered, drone, get WDh() { return WD.heli; }, updHorde, showIntro, nextIntro, inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { fpsTick, resInfo: () => ({ pr: renderer.getPixelRatio(), scale: pixelScale, air: resAir, q: SET.q }), solidPlayer, HAUNT, logs, logFound, haunt, ghostMesh, ECHOES, AIR, D, H, RIDE, launchDrone, landDrone, enterHeli, exitHeli, startRide, coasterPowered, drone, get WDh() { return WD.heli; }, updHorde, showIntro, nextIntro, inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

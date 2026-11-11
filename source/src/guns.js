@@ -10,8 +10,8 @@ let MATS = null;
 function mats() {
   if (MATS) return MATS;
   MATS = {
-    metal: std({ color: 0x2b2d31, metalness: 0.7, roughness: 0.42 }),
-    blued: std({ color: 0x1d2128, metalness: 0.85, roughness: 0.3 }),
+    metal: std({ color: 0x34373c, metalness: 0.65, roughness: 0.42 }),
+    blued: std({ color: 0x272c34, metalness: 0.8, roughness: 0.32 }),
     steel: std({ color: 0x9a9ea4, metalness: 0.9, roughness: 0.25 }),
     wood: std({ map: T.wood(), color: 0xa8703f, roughness: 0.55 }),
     poly: std({ color: 0x1c1d20, roughness: 0.78 }),
@@ -38,6 +38,13 @@ function clean(g) {
 }
 
 // measured from each model: front-sight tip, red-dot centre or scope axis, in metres above the bore line origin
+// where the hands go: GRIP = [yTop, fTop, yBottom, fBottom] of the grip's front edge, FORE = [forward, bottom y, half width] of the
+// handguard (null = two-handed pistol hold)
+const GRIP = { pistol: [0.03, 0.014, -0.092, 0.0], brawler: [0.034, 0.0, -0.08, -0.012], viper: [0.03, 0.02, -0.088, 0.004], ripper: [0.03, 0.02, -0.088, 0.004],
+  trench: [-0.01, -0.025, -0.075, -0.03], ranger: [0.006, 0.03, -0.07, 0.0], widow: [0.006, 0.03, -0.07, 0.0], kestrel: [0.012, 0.01, -0.088, -0.006],
+  hammer: [0.02, 0.01, -0.088, -0.004], ion: [0.024, 0.012, -0.088, -0.004], surge: [0.024, 0.012, -0.09, -0.004] };
+const FORE = { pistol: null, brawler: null, viper: [0.27, 0.028, 0.029], ripper: [0.27, 0.028, 0.029], trench: [0.4, 0.02, 0.027], ranger: [0.28, 0.03, 0.023],
+  widow: [0.28, 0.03, 0.023], kestrel: [0.28, 0.033, 0.031], hammer: [0.36, 0.03, 0.032], ion: [0.17, 0.03, 0.035], surge: [0.16, 0.025, 0.045] };
 const SIGHT = { pistol: 0.099, ranger: 0.102, viper: 0.117, ripper: 0.117, trench: 0.095, kestrel: 0.128, hammer: 0.136, brawler: 0.107, widow: 0.136, ion: 0.148, surge: 0.152 };
 export function makeGun(key, pap) {
   const m = mats();
@@ -75,7 +82,23 @@ export function makeGun(key, pap) {
       box(0.155, 0.094, 0.006, 0.01, 0.012, 'metal'); box(-0.036, 0.094, 0.03, 0.012, 0.01, 'metal');
       box(-0.058, 0.08, 0.012, 0.016, 0.012, 'steel', 0, -0.4);
       box(0.02, 0.04, 0.008, 0.008, 0.02, 'steel', 0.018);
-      guard(0.035, 0.022); mf = 0.18; my = 0.07; break;
+      guard(0.035, 0.022);
+      // close-up detail: ejection port with the barrel hood, front cocking serrations, slide stop, thumb safety, beavertail,
+      // magazine release, grip screws and panel borders, night-sight dots
+      box(0.083, 0.072, 0.002, 0.015, 0.038, 'rubber', 0.0166); box(0.083, 0.074, 0.002, 0.01, 0.032, 'steel', 0.0158);
+      for (let i = 0; i < 4; i++) box(0.128 + i * 0.008, 0.068, 0.0345, 0.024, 0.0022, 'rubber');
+      box(0.112, 0.0835, 0.016, 0.002, 0.11, 'steel'); // flat top rib catches the light
+      box(0.06, 0.05, 0.004, 0.009, 0.034, 'steel', -0.0166); put(new THREE.CylinderGeometry(0.004, 0.004, 0.004, 10).rotateZ(Math.PI / 2), 'steel', 0.075, 0.042, -0.0168);
+      box(-0.026, 0.053, 0.004, 0.008, 0.024, 'steel', -0.0166); box(-0.034, 0.055, 0.005, 0.006, 0.008, 'steel', -0.0168);
+      side([[-0.05, 0.036], [-0.044, 0.046], [-0.064, 0.05], [-0.072, 0.044], [-0.066, 0.036]], 0.028, 'metal', 0.002);
+      put(new THREE.CylinderGeometry(0.0045, 0.0045, 0.004, 10).rotateZ(Math.PI / 2), 'steel', 0.006, 0.014, -0.0158);
+      for (const sx of [-1, 1]) {
+        for (const y of [-0.005, -0.072]) put(new THREE.CylinderGeometry(0.0035, 0.0035, 0.003, 10).rotateZ(Math.PI / 2), 'steel', 0.028 + y * 0.12, y, sx * 0.0188);
+        box(-0.026, -0.038, 0.002, 0.11, 0.003, 'metal', sx * 0.0178, 0.1); box(0.004, -0.038, 0.002, 0.11, 0.003, 'metal', sx * 0.0178, 0.1);
+      }
+      for (let i = 0; i < 7; i++) box(-0.06 - i * 0.0004, 0.012 - i * 0.014, 0.022, 0.0025, 0.006, 'metal'); // mainspring housing grooves
+      put(new THREE.SphereGeometry(0.0022, 8, 6), 'glow', 0.155, 0.0975); for (const sx of [-1, 1]) put(new THREE.SphereGeometry(0.0022, 8, 6), 'glow', -0.0405, 0.099, sx * 0.0075);
+      mf = 0.18; my = 0.07; break;
     }
     case 'brawler': { // heavy revolver
       side([[-0.045, 0.03], [0.075, 0.03], [0.075, 0.094], [0.0, 0.098], [-0.03, 0.094], [-0.052, 0.074]], 0.03, 'steel', 0.004);
@@ -196,5 +219,5 @@ export function makeGun(key, pap) {
   for (const [M, list] of parts) { const mesh = new THREE.Mesh(mergeGeometries(list, false), M); mesh.castShadow = true; group.add(mesh); }
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, my, -mf); group.add(muzzle);
   // sight: height of the aiming point (front post tip / red dot / scope axis). Aiming down sights puts this exactly on the crosshair.
-  return { group, muzzle, sight: SIGHT[key] ?? 0.11 };
+  return { group, muzzle, sight: SIGHT[key] ?? 0.11, grip: GRIP[key], fore: FORE[key] === undefined ? [0.25, 0.03, 0.03] : FORE[key] };
 }
