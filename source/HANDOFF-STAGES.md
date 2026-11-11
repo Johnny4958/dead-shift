@@ -50,7 +50,7 @@ https://johnny4958.github.io/dead-shift/ . Local servers: 8112 = dist (new), 811
   placeBase/repower (POWER_R 16 m: floodlights light up and benches work only near a generator), floodlights add a lightSrc,
   zTraps (trap holds 4 s, 1.5 s for bosses, 3 uses; mine = blast()), traders set up lazily within 140 m (campSpot finds open ground),
   shop panel reuses #upgPanel (openShop/renderShop/shopBuy). Scrap: 1 per kill, 15 per boss; G.scrap and G.inv reset on new game.
-  Admin extra row: +20 SCRAP, TRAPS, MINES. Build bar wraps; on touch landscape it sits at the bottom and the ammo box hides while building.
+  Admin extra row: +20 SCRAP, TRAPS, MINES. Shop panel DONE button is in a sticky header (it used to scroll off a short landscape screen). Build bar wraps; on touch landscape it sits at the bottom and the ammo box hides while building.
 - tests/base.py WxH: places gen/lamp/bench with taps, power range, craft, trap holds, mine kills, trade with Dale, all 3 camps appear.
 - Perf (844x390): 10-piece base +19 calls/+4% tris at night; Dale's camp +24 calls/+3.6k tris when in view; perfcmp spots unchanged.
 

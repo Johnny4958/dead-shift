@@ -91,7 +91,9 @@ async def main():
     await tap('#upgList button[data-w="mine"]'); await tap('#upgList button[data-w="sell"]')
     out['trade'] = {'before': before, 'after': await ev('[__ds.G.points, __ds.G.inv.mine, __ds.G.scrap]')}
     await pg.screenshot(path=SHOT + f'trade_{W}x{H}.png')
+    out['doneOnScreen'] = await ev('(()=>{const b=document.getElementById("upgClose").getBoundingClientRect(); const t=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2); return b.top>=0&&b.bottom<=innerHeight&&t&&t.id==="upgClose";})()')
     await tap('#upgClose'); await pg.wait_for_timeout(300)
+    out['tradeClosed'] = await ev('__ds.G.state')
     out['allTraders'] = await ev('(()=>{const d=__ds; return d.traders.map(t=>{ d.P.fly=true; d.P.x=t.x+30; d.P.z=t.z; for(let k=0;k<90&&!t.ready;k++) d.sim(0.25,false); d.P.fly=false; return [t.name, t.ready, +t.x.toFixed(0), +t.z.toFixed(0)];});})()')
     # scrap from kills
     out['scrapFromMineKill'] = scrapMine
