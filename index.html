@@ -47,6 +47,7 @@ canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block}
 #readbox.radio{background:rgba(20,26,20,.92);color:#9fe09a;font:600 clamp(14px,2.2vh,18px) 'Courier New',monospace;transform:translateX(-50%);border:1px solid #4a6a48}
 #readbox small{display:block;margin-top:8px;font:12px Arial;opacity:.65}
 #prompt .k{display:inline-block;min-width:24px;padding:0 6px;border:1px solid #ddd;border-radius:4px;background:rgba(255,255,255,.12);margin:0 4px}
+#intro{background:#000;z-index:30}#introText{max-width:min(640px,90vw);font-size:clamp(17px,2.6vh + 0.6vw,26px);line-height:1.5;color:#e6e0d6;opacity:0;transition:opacity .8s;font-family:Georgia,serif}#introText.on{opacity:1}#introText b{display:block;color:#ff3a2a;font-family:inherit;letter-spacing:3px;font-size:.8em;margin-bottom:10px}#introHint{position:absolute;bottom:calc(22px + env(safe-area-inset-bottom));left:0;right:0;color:#777;font-size:13px;letter-spacing:2px}#bSkipIntro{position:absolute;top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right));padding:8px 18px;font-size:14px;min-width:0;margin:0}
 #center{position:absolute;left:50%;top:30%;transform:translate(-50%,-50%);text-align:center;font-weight:800;font-size:clamp(28px,6vh,52px);color:#ff3a2a;text-shadow:0 0 20px rgba(255,0,0,.6),2px 2px 0 #000;opacity:0;transition:opacity .4s;white-space:nowrap}
 #center.show{opacity:1}
 #center small{display:block;font-size:.45em;color:#eee;font-weight:600;letter-spacing:2px}
@@ -227,10 +228,12 @@ body.upright #rotateMsg{display:none!important}
 </div>
 <div id="rotateMsg"><div class="ph"></div>Plays best with your phone sideways<button id="bUpright" style="margin-top:22px;font-size:17px;padding:12px 22px;border-radius:10px;border:2px solid #ccc;background:#222;color:#fff">Play upright anyway</button></div>
 
+<div id="intro" class="screen hidden"><div id="introText"></div><div id="introHint">TAP TO CONTINUE</div><button class="btn" id="bSkipIntro">SKIP</button></div>
 <div id="title" class="screen">
   <h1>DEAD SHIFT</h1>
   <h2>LOCKWOOD MOTEL</h2>
   <button class="btn" id="bPlay">PLAY</button>
+  <button class="btn" id="bStory">STORY</button>
   <button class="btn" id="bControls">CONTROLS</button>
   <button class="btn" id="bSettings">SETTINGS</button>
   <div id="best"></div>
@@ -272,7 +275,7 @@ body.upright #rotateMsg{display:none!important}
     <div class="opt">Your points: <b id="admPts">0</b><div class="row seg" id="admMoney"><button data-n="1000">+1,000</button><button data-n="10000">+10,000</button><button data-n="100000">+100,000</button></div></div>
     <div class="opt">Give gun<div class="row seg" id="admPapSeg"><button data-v="0">NORMAL</button><button data-v="1">UPGRADED</button></div></div>
     <div class="row seg" id="admGuns" style="flex-wrap:wrap;gap:4px;justify-content:flex-start"></div>
-    <div class="opt" style="margin-top:8px">Extras<div class="row seg" id="admExtra"><button data-a="ammo">REFILL AMMO</button><button data-a="god">GOD MODE: OFF</button><button data-a="fly">FLY: OFF</button><button data-a="scrap">+20 SCRAP, TRAPS, MINES</button></div></div>
+    <div class="opt" style="margin-top:8px">Extras<div class="row seg" id="admExtra"><button data-a="ammo">REFILL AMMO</button><button data-a="god">GOD MODE: OFF</button><button data-a="fly">FLY: OFF</button><button data-a="scrap">+20 SCRAP, TRAPS, MINES</button><button data-a="horde">HORDE NOW</button></div></div>
     <div class="opt">Time / weather<div class="row seg" id="admWorld" style="flex-wrap:wrap"><button data-h="12">NOON</button><button data-h="18.2">DUSK</button><button data-h="0">MIDNIGHT</button><button data-w="clear">CLEAR</button><button data-w="fog">FOG</button><button data-w="rain">RAIN</button><button data-w="storm">STORM</button></div></div>
     <div class="hint" id="admMsg" style="text-align:left;margin:6px 0 0;min-height:18px"></div>
   </div>
@@ -299,6 +302,6 @@ body.upright #rotateMsg{display:none!important}
   <button class="btn" id="bAgain">PLAY AGAIN</button>
   <button class="btn" id="bMenu">MENU</button>
 </div>
-<script type="module" src="main.js?v=mwbhcmkx"></script>
+<script type="module" src="main.js?v=mwbhs98k"></script>
 </body>
 </html>

@@ -115,6 +115,7 @@ export const sfx = {
   perk() { if (!ctx) return; const t = now(); noise(t, 0.15, 2000, 1, 0.2); [523, 659, 784, 1046].forEach((f, i) => tone(t + 0.25 + i * 0.09, f, f, 0.2, 0.15, 'triangle')); },
   powerup(kind) { if (!ctx) return; const t = now(); const n = kind === 'nuke' ? [200, 100, 50] : [660, 880, 1100, 1320]; n.forEach((f, i) => tone(t + i * 0.08, f, f, 0.25, 0.25, kind === 'nuke' ? 'sawtooth' : 'square')); if (kind === 'nuke') noise(t, 1.6, 200, 0.5, 0.8); },
   thunder() { if (!ctx) return; const t = now(); noise(t, 0.35, 900, 0.6, 0.35); noise(t + 0.05, 3.2, 120, 0.5, 0.9); noise(t + 0.4, 2.4, 70, 0.4, 0.7); },
+  siren() { if (!ctx) return; const t = now(); for (let k = 0; k < 3; k++) { tone(t + k * 1.6, 420, 880, 0.8, 0.16, 'sawtooth'); tone(t + k * 1.6 + 0.8, 880, 420, 0.8, 0.16, 'sawtooth'); } },
   boom() { if (!ctx) return; const t = now(); noise(t, 1.2, 380, 0.4, 1.0); tone(t, 90, 25, 0.9, 0.8); },
   spike() { if (!ctx) return; const t = now(); noise(t, 0.12, 1500, 2, 0.25, 'bandpass'); },
   build() { if (!ctx) return; const t = now(); for (let i = 0; i < 3; i++) { tone(t + i * 0.09, 1500, 1100, 0.05, 0.25, 'square'); noise(t + i * 0.09, 0.07, 3500, 3, 0.25, 'bandpass'); } },

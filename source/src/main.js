@@ -232,7 +232,7 @@ function newGame() {
   recenter(startPos.x, startPos.z, true);
   for (const d of doors) WD.doorMeshes[d.id].visible = true;
   for (const w of windows) { w.planks = 6; WD.planks[w.id].list.forEach(p => p.visible = true); }
-  Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0, god: false, scrap: 0, inv: { trap: 0, mine: 0 } });
+  Object.assign(G, { t: 0, round: 0, toSpawn: 0, between: false, kills: 0, heads: 0, points: 500, power: false, flowDirty: true, insta: 0, dbl: 0, mapDirty: true, downs: 0, god: false, scrap: 0, inv: { trap: 0, mine: 0 }, hordeIn: null, hordeLeft: 0, hordeDone: false, hordeWarned: false, hordes: 0 });
   Object.assign(P, { x: startPos.x, z: startPos.z, y: 0, vy: 0, yaw: Math.PI, pitch: 0, hp: 100, maxHp: 100, lastHit: -9, cur: 0, reloadT: 0, fireT: 0, knifeT: 0, swapT: 0, nades: 2, view: 'fp', ads: 0, driving: false, bleedT: 0, stepN: 0 });
   blood.length = 0; bloodMesh.count = 0; stealthShown = -1; SKY.newGame(); clockT = 0;
   P.perks.clear(); P.guns = [makeGun('pistol')]; setVmGun();
@@ -264,7 +264,24 @@ function startRound(r) {
   else center('DEAD SHIFT<small>SURVIVE THE NIGHT</small>', 3.5);
   drawRound(); $('round').classList.add('flash'); setTimeout(() => $('round').classList.remove('flash'), 1200); updHud();
 }
+// ---- horde events: from round 4, every few minutes a siren warns you, then a big pack that already knows where you are comes in ----
+function updHorde(dt) {
+  if (G.round < 4) return;
+  if (G.hordeIn == null) G.hordeIn = 150 + R() * 90;
+  if (G.hordeLeft > 0) {
+    G.hordeSpT -= dt; const alive = zombies.filter(z => !z.dead).length;
+    if (G.hordeSpT <= 0 && alive < maxAlive() + 4) { G.hordeSpT = 0.45; G.hordeLeft--; spawnZombie(G.round >= 6 && R() < 0.35 ? 'runner' : null); const z = zombies[zombies.length - 1]; z.horde = true; z.rage = 12; spotP(z, P.driving ? car.x : P.x, P.driving ? car.z : P.z, 30); updHud(); }
+    if (G.hordeLeft <= 0) G.hordeDone = true;
+    return;
+  }
+  if (G.hordeDone) { if (!zombies.some(z => !z.dead && z.horde)) { G.hordeDone = false; const b = 400 + G.round * 40; addPts(b); G.hordeBonus = b; toast('Horde survived: +' + b + ' points'); } return; }
+  if (G.between) return;
+  G.hordeIn -= dt;
+  if (G.hordeIn <= 20 && !G.hordeWarned) { G.hordeWarned = true; sfx.siren(); center('HORDE INCOMING<small>20 SECONDS - GET TO YOUR BASE OR RUN</small>', 4); rumble(0.5, 0.5, 400); }
+  if (G.hordeIn <= 0) { G.hordeWarned = false; G.hordeIn = 210 + R() * 120; G.hordeLeft = Math.min(28, 10 + G.round); G.hordeSpT = 0; G.hordes = (G.hordes || 0) + 1; center('HERE THEY COME', 2); sfx.zscream(10, 0); }
+}
 function updRounds(dt) {
+  updHorde(dt);
   if (G.between) { G.betweenT -= dt; if (G.betweenT <= 0) startRound(G.round + 1); return; }
   const alive = zombies.filter(z => !z.dead).length;
   G.spawnT -= dt;
@@ -760,7 +777,7 @@ function renderUpg() {
 function buyUpg(id) {
   const v = upgVeh, u = UPGRADES.find(q => q.id === id); if (!v || !u || v.upg[id]) return;
   if (G.points < u.cost) { sfx.deny(); toast('Not enough points'); return; }
-  addPts(-u.cost); v.upg[id] = true; showParts(v.parts, v.upg); sfx.build(); noise(v.x, v.z, 14); renderUpg(); toast(u.name + ' installed');
+  addPts(u.cost, true); v.upg[id] = true; showParts(v.parts, v.upg); sfx.build(); noise(v.x, v.z, 14); renderUpg(); toast(u.name + ' installed');
 }
 $('upgList').addEventListener('click', e => { const b = e.target.closest('button[data-u]'); if (b) buyUpg(b.dataset.u); const c = e.target.closest('button[data-w]'); if (c) shopBuy(c.dataset.w); });
 $('upgClose').onclick = () => closeUpg();
@@ -1039,7 +1056,28 @@ function loop(now) {
 const screens = ['title', 'pause', 'settings', 'controls', 'over', 'admin', 'pin'];
 let back = 'title';
 function show(id) { for (const s of screens) $(s).classList.toggle('hidden', s !== id); }
+// ---- story intro: shown before the first game of a visit (SKIP or tap through), then you wake in the motel garage ----
+const INTRO = [
+  '<b>OCTOBER 14</b>It started at the Hollis Ag research farm off Route 9. The news called it a "chemical spill". Then the news stopped.',
+  '<b>OCTOBER 16</b>People who got sick did not stay dead. They got up hungry, and they could hear a car door from a block away.',
+  '<b>OCTOBER 19</b>The army set up an evacuation at the Ashford church and a fallback base past the graveyard. The radio said: go quiet, go at night, do not bleed.',
+  '<b>TONIGHT</b>You were supposed to be on the last truck out of Lockwood. You hid in the motel garage instead. The truck never came back.',
+  '<b>LOCKWOOD MOTEL</b>Board the windows. Find the power. Kill them for scrap and points. Survive as many rounds as you can.',
+];
+let introI = -1, introT = 0, introSeen = !!localStorage.getItem('ds_intro') || (navigator.webdriver && !window.__forceIntro); // once per device; STORY on the title replays it (automated test browsers skip it)
+function showIntro() { introI = -1; show(null); $('intro').classList.remove('hidden'); G.state = 'intro'; nextIntro(); }
+function nextIntro() {
+  if (introT > performance.now()) return; introT = performance.now() + 350;
+  introI++; const el = $('introText'); if (introI >= INTRO.length) return endIntro();
+  el.classList.remove('on'); setTimeout(() => { el.innerHTML = INTRO[introI]; el.classList.add('on'); }, introI ? 250 : 0);
+}
+function endIntro() { introSeen = true; localStorage.setItem('ds_intro', '1'); $('intro').classList.add('hidden'); $('introText').classList.remove('on'); G.state = 'title'; play(); }
+$('intro').addEventListener('click', e => { if (e.target.id === 'bSkipIntro') return; nextIntro(); });
+$('bStory').onclick = () => { initAudio(); introSeen = false; showIntro(); };
+$('bSkipIntro').onclick = e => { e.stopPropagation(); endIntro(); };
+addEventListener('keydown', e => { if (G.state !== 'intro') return; if (e.code === 'Escape') endIntro(); else if (e.code === 'Space' || e.code === 'Enter') nextIntro(); });
 function play() {
+  if (!introSeen) { initAudio(); return showIntro(); }
   initAudio(); setVolume(SET.vol);
   newGame(); admOpen = false; G.state = 'play'; show(null); $('hud').classList.remove('hidden'); $('touch').classList.add('live');
   if (inp.device === 'kbm' && !isTouch) canvas.requestPointerLock?.();
@@ -1088,6 +1126,7 @@ $('bAdmBack').onclick = () => show('pause');
 for (const b of $('admMoney').children) b.onclick = () => { const n = +b.dataset.n; G.points += n; updHud(); admSync(); admMsg('Added ' + n.toLocaleString() + ' points to you.'); };
 for (const b of $('admPapSeg').children) b.onclick = () => { admPap = b.dataset.v === '1'; admSync(); };
 for (const b of $('admGuns').children) b.onclick = () => { giveGun(b.dataset.k, admPap); updHud(); admMsg('You now have the ' + gunNow().name + '.'); };
+$('admExtra').children[4].onclick = () => { if (G.round < 4) G.round = 4; G.hordeLeft = 0; G.hordeDone = false; G.hordeWarned = false; G.hordeIn = 21; admMsg('A horde is coming in about 20 seconds.'); };
 $('admExtra').children[3].onclick = () => { G.scrap += 20; G.inv.trap += 2; G.inv.mine += 2; updHud(); drawBuildbar(); admMsg('Added 20 scrap, 2 bear traps and 2 landmines.'); };
 $('admExtra').children[0].onclick = () => { for (const g of P.guns) { g.clip = g.mag; g.reserve = g.maxReserve; } P.nades = Math.max(P.nades, 4); updHud(); admMsg('Ammo and grenades refilled.'); };
 $('admExtra').children[2].onclick = () => { G.fly = !G.fly; if (!G.fly) P.vy = -0.01; admSync(); admMsg(G.fly ? 'Flight on: fly where you look. Keyboard: Space up, Ctrl or Z down, Shift fast. Phone/controller: look up or down while moving.' : 'Flight off: you drop back to the ground.'); };
@@ -1114,4 +1153,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { updHorde, showIntro, nextIntro, inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

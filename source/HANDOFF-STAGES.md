@@ -54,5 +54,15 @@ https://johnny4958.github.io/dead-shift/ . Local servers: 8112 = dist (new), 811
 - tests/base.py WxH: places gen/lamp/bench with taps, power range, craft, trap holds, mine kills, trade with Dale, all 3 camps appear.
 - Perf (844x390): 10-piece base +19 calls/+4% tris at night; Dale's camp +24 calls/+3.6k tris when in view; perfcmp spots unchanged.
 
+## Stage 5a: story intro + horde events (DONE, published)
+- Intro: INTRO[] pages in main.js (search "story intro"), #intro overlay, tap/Space to advance, SKIP, shown once per device
+  (localStorage ds_intro), STORY button on the title replays it. Automated browsers skip it (navigator.webdriver) unless window.__forceIntro.
+- Hordes: updHorde() (called from updRounds). From round 4, first one 2.5-4 min in, then every 3.5-5.5 min: sfx.siren() + 20 s warning,
+  then min(28, 10+round) zombies that start hunting you, spawn cap maxAlive()+4, bonus 400+40*round when all are dead. Admin: HORDE NOW.
+- Fixed: buyUpg used addPts(-cost), which doubled the price during Double Points; now addPts(cost, true).
+- tests/story.py WxH.
+Remaining stage 3 items, not started: journals/audio logs beyond the existing notes and radios, hallucinations, drone, helicopter,
+roller coaster, 4-player co-op (GitHub Pages is static: co-op would need WebRTC peer-to-peer with a free signalling service, or a host).
+
 Stages 4 (generators, crafting table, traps/mines, traders) and 5 (intro, journals, hallucinations, hordes, drone, helicopter,
 roller coaster, co-op) not started.
