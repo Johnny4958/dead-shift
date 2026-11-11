@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { inp, took, endFrame, setupInput, setDevice, pollKeyboard, pollGamepad, rumble, touchSprint, resetDriveTouch } from './input.js';
 import { initAudio, setVolume, sfx, setEngine, setSqueal, setRain, setRotor } from './audio.js';
+import { LOGS, ECHOES, WHISPERS } from './lore.js';
 import { initCarFx, clearCarFx, stepCar, unstick, idleCarFx, carBlocked, roomy, useSpec } from './car.js';
 import { SPECS, UPGRADES, makePickup, makeCruiser, makeUpgradeParts, showParts } from './vehicles.js';
 import { S, GW, GH, surf, OUT, FLOOR, WIN, DOOR, BWALL, BDOOR, SPIKE, grid, zone, owner, idx, inb, at, tileOf, cx, doors, windows, openZones, buildMap, solidPlayer, solidZombie, solidCar, blocksBullet, collide, gridRay, dist, flow, spawnSpot, recenter, setProcProvider, ijOf, TREE, TRUNK_R, treeOff, safe, area, AREA_NAMES, windowShifts, rooms, WALL, GLASS, FENCE, special } from './map.js';
@@ -10,7 +11,7 @@ import { genChunk, initProc, roadAt, furnishFixed } from './proc.js';
 import { initStream, updateStream, readsNear, live as liveChunks, stats as streamStats } from './stream.js';
 import { pushOut } from './props.js';
 import { baseGeo, makeSurvivor, TRADERS, WARES, RECIPES } from './base.js';
-import { makeZombie, animZombie, warmZombies, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo, wallGeo } from './models.js';
+import { makeZombie, animZombie, warmZombies, makeSoldier, animSoldier, makeGun as gunModel, makeArms, buildMats, pieceGeo, wallGeo, merge } from './models.js';
 import { T, setAniso } from './tex.js';
 import { T2 } from './tex2.js';
 import { W, BOX_POOL, PAP_NAMES, makeGun } from './weapons.js';
@@ -240,7 +241,7 @@ function newGame() {
   box.spot = 0; box.state = 'idle'; box.uses = 0; if (box.model) { WD.box.gunSlot.remove(box.model); box.model = null; } WD.box.lid.rotation.x = 0; placeBox();
   for (const v of cars) { const st = vehStart[v.id]; Object.assign(v, { x: st.x, z: st.z, h: st.h || 0, v: 0, vx: 0, vz: 0, yr: 0, steer: 0, stuckT: 0, upg: {}, nos: 1, fuel: 1 }); showParts(v.parts, v.upg); placeVeh(v); }
   car = cars[0]; setEngine(false); setSqueal(0); clearCarFx(); $('upgPanel').classList.add('hidden');
-  airReset();
+  airReset(); hauntReset();
   build.on = false; document.body.classList.remove('building', 'driving'); $('buildbar').classList.add('hidden'); $('carhud').classList.add('hidden');
   startRound(1); updHud();
 }
@@ -593,7 +594,7 @@ function buy(cost) { if (G.points < cost) { sfx.deny(); toast('Not enough points
 const K = () => `<span class="k">${keyName('use')}</span>`;
 let readOpen = null;
 function showRead(r) { const el = $('readbox'); el.innerHTML = '<div>' + r.text.replace(/</g, '&lt;') + '</div><small>' + (inp.device === 'touch' ? 'Tap USE to close, or walk away' : 'Press ' + keyName('use') + ' to close') + '</small>'; el.classList.remove('hidden'); el.classList.toggle('radio', !!r.radio); readOpen = { r, t: performance.now() }; if (r.radio) sfx.radio(); else sfx.click?.(); }
-function closeRead() { $('readbox').classList.add('hidden'); readOpen = null; }
+function closeRead() { $('readbox').classList.add('hidden'); readOpen = null; stopTape(); }
 function readables(use) {
   if (readOpen) return '';
   const r = readsNear(P.x, P.z); if (!r) return '';
@@ -604,7 +605,7 @@ function interact(dt) {
   let txt = ''; const use = took('use'), hold = inp.use;
   if (AIR.mode) { if (AIR.mode === 'heli') prompt(H.y < 0.6 ? K() + ' Get out' : ''); else prompt(''); return; }
   if (P.driving) { const since = (performance.now() - (P.carT || 0)) / 1000; P.carStillT = Math.abs(car.v) < 1 ? (P.carStillT || 0) + dt : 0; prompt(since < 2.5 || P.carStillT > 1.2 ? K() + ' Get out' : ''); if (use) exitCar(); return; }
-  if (readOpen) { const r = readOpen.r; if (Math.hypot(r.x - P.x, r.z - P.z) > (r.r || 3) + 2 || performance.now() - readOpen.t > 12000) closeRead(); else if (use) { closeRead(); prompt(''); return; } }
+  if (readOpen) { const r = readOpen.r; if (Math.hypot(r.x - P.x, r.z - P.z) > (r.r || 3) + 2 || performance.now() - readOpen.t > (r.dur || 12000)) closeRead(); else if (use) { closeRead(); prompt(''); return; } }
   // window repair
   let repairing = false;
   for (const w of windows) { const ip = { x: cx(w.i) - w.outDir[0] * 1.1, z: cx(w.j) - w.outDir[1] * 1.1 }; if (w.planks < 6 && near(ip, 1.6)) { txt = 'Hold ' + K() + ' to rebuild the barrier'; if (hold) { repairing = true; P.repT += dt; if (P.repT > 0.7) { P.repT = 0; WD.planks[w.id].list[w.planks].visible = true; w.planks++; sfx.nail(); noise(P.x, P.z, 10); G.flowDirty = true; if (G.repairPts < 500) { addPts(10); G.repairPts += 10; } updHud(); } } break; } }
@@ -623,6 +624,7 @@ function interact(dt) {
   if (!txt) { const v = nearVeh(3.4); if (v) { txt = K() + ' Drive the ' + v.spec.name.toLowerCase(); if (use) { car = v; enterCar(); } } }
   if (!txt && !P.driving && Math.hypot(P.x - special.pad.x, P.z - special.pad.z) < 3.5) { const v = nearVeh(9); txt = v ? K() + ' Upgrade the ' + v.spec.name.toLowerCase() : 'Park a car on the UPGRADES pad to upgrade it'; if (use && v) openUpg(v); }
   if (!txt && !P.driving) txt = airInteract(use);
+  if (!txt) txt = logsNear(use);
   if (!txt) txt = readables(use);
   prompt(txt || (build.on ? build.promptTxt || '' : ''));
 }
@@ -1062,6 +1064,84 @@ function airCam(dt) {
   else if (AIR.mode === 'ride') { const tg = WD.coaster.curve.getTangentAt(RIDE.t % 1), p = WD.coaster.cart.position; camera.rotation.order = 'YXZ'; camera.rotation.set(Math.asin(clamp(tg.y, -1, 1)) * 0.8 + RIDE.lp, Math.atan2(-tg.x, -tg.z) + RIDE.ly, 0); camera.position.set(p.x, p.y + 1.35, p.z); }
 }
 
+
+// ---------------- story logs, hallucinations, ghostly echoes ----------------
+const HAUNT = { t: 90, dread: 0, ghost: null, echoSeen: new Set(), events: 0, last: '', textT: 0 };
+const logFound = new Set(JSON.parse(localStorage.getItem('ds_logs') || '[]'));
+const ghostMesh = (() => {
+  const B = (w, h, d, x, y, z) => { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return g; };
+  const head = new THREE.SphereGeometry(0.14, 10, 8); head.translate(0, 1.62, 0);
+  const torso = new THREE.CylinderGeometry(0.2, 0.3, 0.75, 8); torso.translate(0, 1.15, 0);
+  const robe = new THREE.CylinderGeometry(0.3, 0.42, 0.8, 8, 1, true); robe.translate(0, 0.45, 0);
+  const g = merge([head, torso, robe, B(0.09, 0.62, 0.09, -0.3, 1.1, 0.12), B(0.09, 0.62, 0.09, 0.3, 1.1, 0.12)]);
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xbfd8ff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  m.visible = false; m.frustumCulled = false; scene.add(m); return m;
+})();
+const logGeo = { journal: (() => { const a = new THREE.BoxGeometry(0.32, 0.05, 0.24); const b = new THREE.BoxGeometry(0.3, 0.035, 0.22); b.translate(0.01, 0.03, 0); return merge([a, b]); })(), tape: (() => { const a = new THREE.BoxGeometry(0.3, 0.1, 0.18); const b = new THREE.CylinderGeometry(0.035, 0.035, 0.02, 10); b.translate(-0.07, 0.06, 0); const c = b.clone(); c.translate(0.14, 0, 0); return merge([a, b, c]); })() };
+const logMat = { journal: new THREE.MeshStandardMaterial({ color: 0x8a6a3a, emissive: 0x3a2a10, roughness: 0.9 }), tape: new THREE.MeshStandardMaterial({ color: 0x2a2a2e, emissive: 0x401010, roughness: 0.5 }) };
+const logs = LOGS.map(L => {
+  let x = L.x, z = L.z;
+  if (inb(tileOf(x), tileOf(z))) { outer: for (let r = 0; r <= 4; r++) for (let a = -r; a <= r; a++) for (const [di, dj] of [[a, -r], [a, r], [-r, a], [r, a]]) { const i = tileOf(L.x) + di, j = tileOf(L.z) + dj; if (inb(i, j) && !solidPlayer(at(i, j))) { x = cx(i); z = cx(j); break outer; } } }
+  const m = new THREE.Mesh(logGeo[L.kind], logMat[L.kind]); m.position.set(x, 0.05, z); m.rotation.y = (L.id * 1.7) % 6.28; m.visible = false; scene.add(m);
+  return { ...L, x, z, m };
+});
+function logsNear(use) {
+  let best = null, bd = 2.3; for (const l of logs) { const d = Math.hypot(l.x - P.x, l.z - P.z); if (d < bd) { bd = d; best = l; } }
+  if (!best) return '';
+  if (use) { openLog(best); return ''; }
+  return K() + (best.kind === 'tape' ? ' Play the tape' : ' Read the journal') + ' (' + best.id + '/' + LOGS.length + ')';
+}
+let speaking = false;
+function openLog(l) {
+  const head = (l.kind === 'tape' ? 'TAPE ' : 'JOURNAL ') + l.id + ' of ' + LOGS.length + ' - ' + l.who;
+  showRead({ x: l.x, z: l.z, r: 3, text: head + '\n\n' + l.text, radio: l.kind === 'tape', dur: 9000 + l.text.length * 65 });
+  if (l.kind === 'tape') { sfx.tapeOn(); try { if (window.speechSynthesis) { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(l.text); u.rate = 0.95; u.pitch = 0.75; u.volume = 0.9; speechSynthesis.speak(u); speaking = true; } } catch (e) { } }
+  if (!logFound.has(l.id)) { logFound.add(l.id); localStorage.setItem('ds_logs', JSON.stringify([...logFound])); toast('Story log found: ' + logFound.size + ' of ' + LOGS.length + (logFound.size === LOGS.length ? ' - the whole story' : '')); }
+}
+function stopTape() { if (speaking) { try { speechSynthesis.cancel(); } catch (e) { } speaking = false; } }
+document.addEventListener('touchend', function unlockSpeech() { document.removeEventListener('touchend', unlockSpeech); try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (e) { } }, { once: true });
+function hauntText(t, secs = 3.5) { const el = $('haunt'); el.textContent = t; el.classList.add('on'); HAUNT.textT = secs; }
+function inGraveyard() { return P.x > 10 && P.x < 100 && P.z > 150 && P.z < 184; }
+function ghostShow(x, z, mode, secs, walk) { const g = { x, z, mode, t: 0, life: secs, walk: walk || null, gone: false, lookT: 0 }; HAUNT.ghost = g; ghostMesh.visible = true; ghostMesh.position.set(x, 0, z); ghostMesh.material.opacity = 0; return g; }
+function phantom() { // a figure at the edge of your view that is not really there
+  const fx = -Math.sin(P.yaw), fz = -Math.cos(P.yaw);
+  for (let k = 0; k < 8; k++) { const a = (Math.random() - 0.5) * 1.6, d = 22 + Math.random() * 9, ca = Math.cos(a), sa = Math.sin(a); const x = P.x + (fx * ca - fz * sa) * d, z = P.z + (fz * ca + fx * sa) * d; if (inb(tileOf(x), tileOf(z)) && solidPlayer(at(tileOf(x), tileOf(z)))) continue; ghostShow(x, z, 'phantom', 6); return true; }
+  return false;
+}
+function haunt(force) {
+  if (HAUNT.ghost) return; HAUNT.events++;
+  const roll = force ? HAUNT.events % 4 : Math.floor(Math.random() * 4), side = Math.random() < 0.5 ? -1 : 1;
+  const w = WHISPERS[Math.floor(Math.random() * WHISPERS.length)];
+  if (roll === 0 && phantom()) { HAUNT.last = 'phantom'; return; }
+  if (roll <= 1) { HAUNT.last = 'steps'; sfx.steps(-side * 0.8); setTimeout(() => G.state === 'play' && hauntText(w), 1400); return; }
+  if (roll === 2) { HAUNT.last = 'wail'; sfx.wail(side * 0.9); SKY.flicker = 1.6; return; }
+  HAUNT.last = 'pulse'; sfx.heart(); sfx.whisper(side * 0.6); hauntText(w, 3); $('hauntfx').classList.remove('pulse'); void $('hauntfx').offsetWidth; $('hauntfx').classList.add('pulse');
+}
+function updHaunt(dt) {
+  if (HAUNT.textT > 0 && (HAUNT.textT -= dt) <= 0) $('haunt').classList.remove('on');
+  // log props: only drawn when close
+  if ((HAUNT.vis = (HAUNT.vis || 0) - dt) <= 0) { HAUNT.vis = 0.5; for (const l of logs) { const d = Math.hypot(l.x - P.x, l.z - P.z); l.m.visible = d < 45; } }
+  const g = HAUNT.ghost;
+  if (g) {
+    g.t += dt; if (g.walk) { const k = Math.min(1, g.t / g.life); ghostMesh.position.set(g.x + g.walk[0] * k, Math.sin(g.t * 2) * 0.05, g.z + g.walk[1] * k); ghostMesh.rotation.y = Math.atan2(g.walk[0], g.walk[1]); }
+    else { ghostMesh.position.y = Math.sin(g.t * 1.7) * 0.06; ghostMesh.rotation.y = Math.atan2(P.x - g.x, P.z - g.z); }
+    const gx = ghostMesh.position.x, gz = ghostMesh.position.z, d = Math.hypot(gx - P.x, gz - P.z);
+    if (g.mode === 'phantom' && !g.gone) { const ang = Math.abs(((Math.atan2(-(gx - P.x), -(gz - P.z)) - P.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI); if (ang < 0.14) g.lookT += dt; if (g.lookT > 0.35 || d < 12 || g.t > g.life) { g.gone = true; g.t = 0; g.life = 0.35; sfx.whisper(0); } }
+    if (g.mode === 'echo' && !g.gone && g.t > g.life) { g.gone = true; g.t = 0; g.life = 1.2; }
+    const peak = g.mode === 'echo' ? 0.42 : 0.3;
+    ghostMesh.material.opacity = g.gone ? Math.max(0, peak * (1 - g.t / g.life)) : Math.min(peak, g.t * 0.7) * (0.85 + Math.random() * 0.15);
+    if (g.gone && g.t >= g.life) { ghostMesh.visible = false; HAUNT.ghost = null; }
+  }
+  if (G.state !== 'play' || AIR.mode || P.driving || build.on || readOpen) return;
+  // ghostly echoes: a pale figure replays what happened here
+  for (let i = 0; i < ECHOES.length; i++) { const e = ECHOES[i]; if (HAUNT.echoSeen.has(i) || HAUNT.ghost) continue; if (Math.hypot(e.x - P.x, e.z - P.z) < 14 && (SKY.light < 0.5 || i === 2)) { HAUNT.echoSeen.add(i); const a = Math.random() * 6.28; ghostShow(e.x, e.z, 'echo', 5, [Math.sin(a) * 5, Math.cos(a) * 5]); hauntText(e.line, 5); sfx.wail(0); HAUNT.last = 'echo'; } }
+  // hallucinations come more often at night, in fog, in the graveyard and when you are hurt
+  const rate = (SKY.light < 0.35 ? 1 : 0.25) + SKY.wk.fog * 0.6 + (inGraveyard() ? 2 : 0) + (P.hp < 50 ? 1 : 0) + (P.bleedT > 0 ? 0.5 : 0);
+  HAUNT.dread = rate; HAUNT.t -= dt * rate;
+  if (HAUNT.t <= 0) { HAUNT.t = 70 + Math.random() * 70; haunt(false); }
+}
+function hauntReset() { HAUNT.t = 90; HAUNT.echoSeen.clear(); HAUNT.ghost = null; ghostMesh.visible = false; HAUNT.textT = 0; $('haunt').classList.remove('on'); stopTape(); }
+
 // ---------------- update ----------------
 let lastT = performance.now(), fpsAcc = 0, fpsN = 0, fpsShow = 0, slowT = 0;
 function update(dt) {
@@ -1115,6 +1195,7 @@ function update(dt) {
   updBase(dt);
   updCar(dt);
   updAir(dt);
+  updHaunt(dt);
   // health
   if (G.t - P.lastHit > 3.5 && P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.5 * dt);
   $('dmg').style.opacity = clamp(1 - P.hp / P.maxHp, 0, 1) * 0.9;
@@ -1268,6 +1349,7 @@ $('bAdmBack').onclick = () => show('pause');
 for (const b of $('admMoney').children) b.onclick = () => { const n = +b.dataset.n; G.points += n; updHud(); admSync(); admMsg('Added ' + n.toLocaleString() + ' points to you.'); };
 for (const b of $('admPapSeg').children) b.onclick = () => { admPap = b.dataset.v === '1'; admSync(); };
 for (const b of $('admGuns').children) b.onclick = () => { giveGun(b.dataset.k, admPap); updHud(); admMsg('You now have the ' + gunNow().name + '.'); };
+$('admExtra').querySelector('[data-a=haunt]').onclick = () => { HAUNT.ghost = null; ghostMesh.visible = false; haunt(true); admMsg('Something is watching you. Close the menu.'); };
 $('admExtra').children[4].onclick = () => { if (G.round < 4) G.round = 4; G.hordeLeft = 0; G.hordeDone = false; G.hordeWarned = false; G.hordeIn = 21; admMsg('A horde is coming in about 20 seconds.'); };
 $('admExtra').children[3].onclick = () => { G.scrap += 20; G.inv.trap += 2; G.inv.mine += 2; updHud(); drawBuildbar(); admMsg('Added 20 scrap, 2 bear traps and 2 landmines.'); };
 $('admExtra').children[0].onclick = () => { for (const g of P.guns) { g.clip = g.mag; g.reserve = g.maxReserve; } P.nades = Math.max(P.nades, 4); updHud(); admMsg('Ammo and grenades refilled.'); };
@@ -1295,4 +1377,4 @@ requestAnimationFrame(loop);
 // test hooks
 const sim = (sec, aim) => { for (let n = 0; n < sec * 30 && G.state === 'play'; n++) { if (aim) autoAim(); update(1 / 30); endFrame(); } return G.state; };
 function autoAim() { let b = null, bd = 1e9; for (const z of zombies) { if (z.dead || z.state === 'rise') continue; const d = Math.hypot(z.x - P.x, z.z - P.z); if (d < bd) { bd = d; b = z; } } inp.fire = false; if (b && bd < 25 && losTo(P.x, P.z, b.x, b.z)) { P.yaw = Math.atan2(-(b.x - P.x), -(b.z - P.z)); P.pitch = Math.atan2(1.2 * (b.m.scale || 1) - 1.62, bd); camera.rotation.set(P.pitch, P.yaw, 0); camera.position.set(P.x, 1.62, P.z); camera.updateMatrixWorld(); inp.fire = !inp.fire_last; inp.fire_last = inp.fire; } }
-window.__ds = { AIR, D, H, RIDE, launchDrone, landDrone, enterHeli, exitHeli, startRide, coasterPowered, drone, get WDh() { return WD.heli; }, updHorde, showIntro, nextIntro, inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };
+window.__ds = { solidPlayer, HAUNT, logs, logFound, haunt, ghostMesh, ECHOES, AIR, D, H, RIDE, launchDrone, landDrone, enterHeli, exitHeli, startRide, coasterPowered, drone, get WDh() { return WD.heli; }, updHorde, showIntro, nextIntro, inb, grid, campSpot, traders, baseTraps, openShop, shopBuy, repower, blast, get shop() { return shop; }, showParts, vm, vmCam, vmGunNow: () => vmGun, pieceRay: (ox, oy, oz, dx, dz, far) => { const rc = new THREE.Raycaster(new THREE.Vector3(ox, oy, oz), new THREE.Vector3(dx, 0, dz).normalize(), 0, far); const h = rc.intersectObjects(pieces.map(p => p.g), true)[0]; return h ? +h.distance.toFixed(3) : -1; }, idx, cx, placePiece, PIECES, wallKey, joins, updateStream, recenter, onWindowMoved, liveChunks, streamStats, windowShifts, readsNear, rooms, LW_FURN, pushOut, renderer, scene, camera, SKY, noise, blood, sense, losTo, initAI, searchAt, distAt: (x, z) => dist[idx(tileOf(x), tileOf(z))], flowK: () => [G.lastFlowK, G.flowT, G.flowDirty], fireOnce: () => { camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ'); camera.position.set(P.x, 1.62 + P.y, P.z); camera.updateMatrixWorld(); fireGun(); }, gunModel, W, inp, WD, box, build, toggleBuild, sim, G, P, zombies, pups, windows, doors, startRound, giveGun, hurt, gameOver, get car() { return car; }, cars, special, addPts, surfAt: (x, z) => { const i = tileOf(x), j = tileOf(z); return inb(i, j) ? [grid[idx(i, j)], surf[idx(i, j)]] : null; }, driveCar: i => { if (P.driving) exitCar(); car = cars[i]; P.x = car.x; P.z = car.z; enterCar(); }, carSpeed: () => Math.hypot(car.vx, car.vz), openUpg, buyUpg, closeUpg, nearVeh, vehStart, pieces, dropPup, spawnZombie, openDoor, damageZombie, enterCar, exitCar, carBlocked, unstick, flipCar, at, tileOf, roadAt, roomy };

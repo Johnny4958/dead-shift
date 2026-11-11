@@ -80,7 +80,7 @@ export function makeSky(scene, camera, WD, renderer) {
     // flashlight: switches itself on at dusk and off at dawn unless you flipped it yourself
     const dark = light < 0.35;
     if (dark !== S.wasDark) { S.wasDark = dark; if (S.flashAuto) S.flash = dark; else S.flashAuto = true; }
-    flash.intensity = S.flash && !hooks.driving ? lerp(46, 18, light) : 0;
+    S.flicker = Math.max(0, (S.flicker || 0) - dt); flash.intensity = S.flash && !hooks.driving ? lerp(46, 18, light) * (S.flicker > 0 && Math.random() < 0.55 ? 0.04 : 1) : 0;
     camera.getWorldDirection(_f); flash.position.copy(cam).addScaledVector(_f, 0.3); flash.position.y -= 0.12; flash.target.position.copy(cam).addScaledVector(_f, 10);
     // how far zombies see: farther by day, less in fog and rain; a lit flashlight in the dark gives you away
     let sm = lerp(0.7, 1.25, light) * (1 - S.wk.fog * 0.3) * (1 - wet * 0.2);

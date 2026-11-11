@@ -123,6 +123,11 @@ export const sfx = {
   toxic() { if (!ctx) return; const t = now(); noise(t, 0.6, 900, 1, 0.5); tone(t, 300, 60, 0.5, 0.3, 'square'); },
   heartbeat() { if (!ctx) return; const t = now(); tone(t, 60, 40, 0.12, 0.6); tone(t + 0.2, 55, 40, 0.12, 0.45); },
   carDoor() { if (!ctx) return; const t = now(); noise(t, 0.12, 600, 1, 0.5); tone(t, 140, 80, 0.1, 0.3, 'square'); },
+  whisper(px = 0) { if (!ctx) return; const t = now(), d = pan(px); for (let k = 0; k < 5; k++) noise(t + k * 0.22 + Math.random() * 0.1, 0.18 + Math.random() * 0.12, 2600 + Math.random() * 1800, 6, 0.05, 'bandpass', d); },
+  steps(px = 0) { if (!ctx) return; const t = now(), d = pan(px); for (let k = 0; k < 4; k++) { noise(t + k * 0.42, 0.07, 320, 1, 0.16, 'lowpass', d); tone(t + k * 0.42, 70, 45, 0.08, 0.1, 'sine', d); } },
+  wail(px = 0) { if (!ctx) return; const t = now(), d = pan(px); const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(520, t); o.frequency.linearRampToValueAtTime(880, t + 0.9); o.frequency.linearRampToValueAtTime(300, t + 2.4); const v = ctx.createOscillator(); v.frequency.value = 6; const vg = ctx.createGain(); vg.gain.value = 18; v.connect(vg); vg.connect(o.frequency); const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07, t + 0.6); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.5); o.connect(g); g.connect(verbIn || d); g.connect(d); o.start(t); v.start(t); o.stop(t + 2.6); v.stop(t + 2.6); },
+  heart() { if (!ctx) return; const t = now(); for (let k = 0; k < 3; k++) { tone(t + k * 0.8, 60, 40, 0.12, 0.35); tone(t + k * 0.8 + 0.2, 55, 38, 0.1, 0.25); } },
+  tapeOn() { if (!ctx) return; const t = now(); tone(t, 900, 600, 0.04, 0.12, 'square'); noise(t + 0.05, 2.5, 3000, 0.5, 0.04, 'highpass'); },
   radio() { if (!ctx) return; const t = now(); noise(t, 1.1, 1900, 2, 0.22, 'bandpass'); noise(t + 0.15, 0.5, 900, 2, 0.12, 'bandpass'); },
   crash(v) { if (!ctx) return; const t = now(); noise(t, 0.4, 500, 0.6, Math.min(1, 0.15 + v * 0.7)); tone(t, 90, 40, 0.25, Math.min(0.6, v * 0.6)); },
 };
